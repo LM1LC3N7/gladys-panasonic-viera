@@ -1,61 +1,98 @@
-# Demo Devices Template
+# Panasonic Viera
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+Control your **Panasonic Viera** TVs from Gladys, on your local network,
+without any cloud: power, volume, mute, remote keys, source (TV, HDMI 1 to 4)
+and application launch. The integration uses the UPnP/SOAP network remote
+control of the TV (port 55000), the one Panasonic's "TV Remote" app uses.
+
+> **Unofficial integration, not affiliated with Panasonic.** This first
+> milestone was written and tested against a simulated TV:
+> it has **never been tested** on a real TV. Your feedback is welcome.
+
+## Prepare the TV
+
+1. In the TV menus: **Network > TV Remote App Settings** (the name varies
+   with the year), enable **TV Remote** (network remote control).
+2. To turn the TV on from Gladys, also enable, depending on the model,
+   **Powered On by Apps** and/or **Wake-on-LAN**.
+3. Give the TV a **fixed IP address** in your router (reserved DHCP lease).
+
+## Add a TV
+
+- **By its address**: type the IP address in "IP addresses of the TVs"
+  (several addresses separated by commas) and save.
+- **By the search**: use **Find the TVs**. Gladys searches the network (SSDP)
+  for the integration; a TV that is off, or a network blocking multicast, may
+  not answer: type the address then.
+
+The TV appears in the integration's **Discovery** tab: create it.
+
+## Pairing (models from about 2018 on)
+
+Recent TVs (FZ, GZ, HZ, JZ series and later) encrypt their remote control and
+ask for a PIN once:
+
+1. Turn the TV on.
+2. In the integration configuration, use **Start pairing** with the TV's IP
+   address. The TV shows a 4-digit PIN.
+3. Within 5 minutes, use **Finish pairing** with that PIN.
+
+The integration then keeps the keys given by the TV in its own data folder
+(`/data`); they are never sent to Gladys nor written to the logs. If the TV is
+reset and refuses these keys, the integration status says so: pair again.
+Older TVs need no pairing.
+
+Before pairing, volume and mute already work; keys, power and applications do
+not.
 
 ## What you get
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+| Feature     | Detail                                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Power       | State read from the TV; command with the power key                                                                                                               |
+| Volume      | 0 to 100, read and set                                                                                                                                           |
+| Mute        | Button: each press toggles the mute read from the TV                                                                                                             |
+| Buttons     | Volume +/-, channel +/-, last view, arrows, OK, back, exit, menu, option, info, guide, input, play, pause, stop, rewind, fast forward, skip back/forward, record |
+| Source      | Dropdown: TV, HDMI 1 to 4                                                                                                                                        |
+| Application | Dropdown: Netflix, YouTube, Prime Video, web browser… and the applications the TV lists (after an "Update" of the device in Discovery)                           |
+| Remote key  | Dropdown of every remote key (digits, colours, subtitles…), handy in scenes                                                                                      |
 
-## Configuration
+Source and application are not read back from the TV: the dropdowns command,
+they do not show the state.
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+## Turning the TV on
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+The power key toggles: the integration reads the state from the TV just
+before acting and sends nothing when the TV already is in the wanted state.
 
-## Actions
+- TV in **network standby** ("Powered On by Apps" enabled): the power key is
+  enough.
+- TV in **deep standby** (it answers nothing at all): **Wake-on-LAN** is
+  needed. Gladys sends the packet for the integration, to the MAC seen by the
+  search, or the one typed in "MAC addresses for Wake-on-LAN"
+  (`192.168.1.40=a8:13:74:12:34:56`). The integration then waits up to 20
+  seconds for the TV to answer, without sending a power key (it could turn
+  off a TV that is booting).
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+Known limit: a TV in standby that still answers volume requests shows as on,
+and "turn on" then sends nothing. To be checked on real models.
 
-## Scenes
+## Settings
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+- **Refresh interval**: how often power, volume and mute are read, 5 to 300
+  seconds (10 by default).
+- **Check the TVs**: state, pairing and Wake-on-LAN of every known TV.
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## Limits
 
-## Dashboard
+- Local network only, port 55000 open between Gladys and the TV.
+- Gladys voice notifications do not go through the TV.
+- The direct HDMI keys and the application list depend on the model.
+- Never tested on a real TV so far.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+## Credits
 
-## Troubleshooting
-
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+Logic ported to JavaScript from
+[panasonic-viera](https://github.com/florianholzapfel/panasonic-viera) by
+Florian Holzapfel (MIT license). Panasonic and Viera are trademarks of
+Panasonic Holdings Corporation, used only to name the compatible products.

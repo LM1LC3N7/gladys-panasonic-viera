@@ -1,177 +1,133 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "Panasonic Viera",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Panasonic Viera TVs on the local network: power, volume, mute, keys, source, apps.",
+    "fr": "TV Panasonic Viera en local : marche, volume, sourdine, touches, source, applis."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-panasonic-viera:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-panasonic-viera/main/cover.png",
+  "categories": ["multimedia"],
+  "transports": ["local"],
+  "network_discovery": [{ "type": "ssdp", "st": "urn:panasonic-com:device:p00RemoteController:1" }],
+  "network_wake": true,
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your Panasonic Viera TVs, on your local network",
+        "fr": "Vos TV Panasonic Viera, sur votre réseau local"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Power, volume, mute, remote keys, source and applications, through the UPnP/SOAP remote control of the TV (port 55000), without any cloud. On the TV, allow the network remote control (Network > TV Remote App Settings). Give each TV a fixed IP address in your router, then type the addresses below, or use \"Find the TVs\". The TVs then appear in the Discovery tab. Models from 2018 on ask for a pairing: see the Pairing section. Unofficial integration, not affiliated with Panasonic.",
+        "fr": "Marche, volume, sourdine, touches de télécommande, source et applications, par la télécommande UPnP/SOAP de la TV (port 55000), sans aucun cloud. Sur la TV, autorisez la commande par le réseau (Réseau > Réglages TV Remote App). Donnez à chaque TV une adresse IP fixe dans votre box, puis saisissez les adresses ci-dessous, ou utilisez « Chercher les TV ». Les TV apparaissent alors dans l'onglet Découverte. Les modèles depuis 2018 demandent un appairage : voir la section Appairage. Intégration non officielle, sans lien avec Panasonic."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://github.com/LM1LC3N7/gladys-panasonic-viera/blob/main/docs/fr.md",
+          "label": { "en": "Guide (French)", "fr": "Guide (français)" }
+        },
+        {
+          "url": "https://github.com/LM1LC3N7/gladys-panasonic-viera/blob/main/docs/en.md",
+          "label": { "en": "Guide (English)", "fr": "Guide (anglais)" }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
+      "key": "addresses",
+      "type": "string",
+      "label": { "en": "IP addresses of the TVs", "fr": "Adresses IP des TV" },
       "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
+        "en": "Separated by commas, for example 192.168.1.40, 192.168.1.41. TVs found by the search are kept without being typed here.",
+        "fr": "Séparées par des virgules, par exemple 192.168.1.40, 192.168.1.41. Les TV trouvées par la recherche sont gardées sans être saisies ici."
       },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "placeholder": { "en": "192.168.1.40", "fr": "192.168.1.40" },
       "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
+      "default": ""
     },
     {
-      "key": "poll_frequency",
+      "key": "mac_addresses",
+      "type": "string",
+      "label": {
+        "en": "MAC addresses for Wake-on-LAN (optional)",
+        "fr": "Adresses MAC pour le Wake-on-LAN (facultatif)"
+      },
+      "description": {
+        "en": "To turn on a TV in deep standby: IP=MAC pairs separated by commas, for example 192.168.1.40=a8:13:74:12:34:56. The search fills the MAC in by itself when Gladys sees it. Wake-on-LAN must be enabled in the TV's network settings.",
+        "fr": "Pour allumer une TV en veille profonde : paires IP=MAC séparées par des virgules, par exemple 192.168.1.40=a8:13:74:12:34:56. La recherche renseigne la MAC d'elle-même quand Gladys la voit. Le Wake-on-LAN doit être activé dans les réglages réseau de la TV."
+      },
+      "placeholder": {
+        "en": "192.168.1.40=a8:13:74:12:34:56",
+        "fr": "192.168.1.40=a8:13:74:12:34:56"
+      },
+      "required": false,
+      "default": ""
+    },
+    {
+      "key": "poll_interval",
       "type": "number",
       "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "How often power, volume and mute are read, in seconds.",
+        "fr": "Fréquence de lecture de la marche, du volume et de la sourdine, en secondes."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 10,
+      "min": 5,
+      "max": 300
+    },
+    {
+      "key": "pairing",
+      "type": "section",
+      "label": { "en": "Pairing (models from 2018 on)", "fr": "Appairage (modèles depuis 2018)" },
+      "description": {
+        "en": "Recent TVs encrypt their remote control and ask for a PIN once. Turn the TV on, press \"Start pairing\" with its IP address: the TV shows a 4-digit PIN. Type it in \"Finish pairing\" within 5 minutes. The keys the TV gives are kept by the integration only. Older TVs need no pairing. Volume and mute work even before pairing.",
+        "fr": "Les TV récentes chiffrent leur télécommande et demandent une fois un code PIN. Allumez la TV, utilisez « Démarrer l'appairage » avec son adresse IP : la TV affiche un code PIN à 4 chiffres. Saisissez-le dans « Terminer l'appairage » dans les 5 minutes. Les clés données par la TV sont gardées par l'intégration seule. Les TV plus anciennes n'ont pas besoin d'appairage. Le volume et la sourdine fonctionnent même avant l'appairage."
+      }
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
+      "key": "find_tvs",
+      "label": { "en": "Find the TVs", "fr": "Chercher les TV" },
+      "timeout_seconds": 60
     },
     {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
+      "key": "start_pairing",
+      "label": { "en": "Start pairing", "fr": "Démarrer l'appairage" },
+      "timeout_seconds": 30,
       "fields": [
         {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
+          "key": "address",
           "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
+          "label": { "en": "IP address of the TV", "fr": "Adresse IP de la TV" },
+          "placeholder": { "en": "192.168.1.40", "fr": "192.168.1.40" },
           "required": true
         }
-      ],
-      "outputs": [
+      ]
+    },
+    {
+      "key": "finish_pairing",
+      "label": { "en": "Finish pairing", "fr": "Terminer l'appairage" },
+      "timeout_seconds": 30,
+      "fields": [
         {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
+          "key": "pin",
+          "type": "string",
+          "label": { "en": "PIN shown on the TV", "fr": "Code PIN affiché sur la TV" },
+          "placeholder": { "en": "1234", "fr": "1234" },
+          "required": true
         }
       ]
-    }
-  ],
-  "widgets": [
+    },
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "key": "check_tvs",
+      "label": { "en": "Check the TVs", "fr": "Vérifier les TV" },
+      "timeout_seconds": 60
     }
   ]
 }

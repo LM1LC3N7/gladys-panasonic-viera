@@ -5,19 +5,22 @@ contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
+A Gladys Assistant **external integration** for Panasonic Viera TVs (local
+UPnP/SOAP remote control, port 55000, PIN pairing on the encrypted models): a
+Node.js service (Node 22+, ESM, no build step) that runs in its own sandboxed
+Docker container and talks to Gladys through
 [`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
 its only runtime dependency. It started from the official JavaScript template.
+See `TODO.md` for the status and the decisions.
 
 ## Commands
 
 ```bash
 npm install
 npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
+node --test test/app.test.js              # one file
+node --test --test-name-pattern "pairing" # tests whose name matches
+npm run cover                             # regenerate cover.png (800×534)
 npm run lint                              # ESLint
 npm run format:check                      # Prettier, as the CI runs it
 npm run format                            # Prettier, fix in place
@@ -31,16 +34,22 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only: src/handlers.js registered before connect()
+src/handlers.js                   the SDK handlers -> VieraApp (shared with the tests)
+src/app.js                        VieraApp: known TVs, SSDP search, polling, commands, pairing
+src/viera/client.js               one TV: description, DMR volume/mute, NRC keys/apps, pairing
+src/viera/crypto.js               AES-128-CBC + HMAC-SHA-256 and key schedules (pure, ported)
+src/viera/soap.js                 SOAP envelopes, answers, UPnP description, app list (pure)
+src/viera/http.js                 node:http exchange, TvError kinds
+src/viera/keys.js                 remote key codes, sources, known application ids
+src/model.js                      known TVs -> Gladys devices and states (pure)
+src/store.js                      /data/viera.json (known TVs, MAC, pairing keys)
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/constants.js, src/i18n.js     frozen keys, limits, timings; texts in English and French
+scripts/cover.mjs                 cover.png generator (plain Node)
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+test/                             node --test, against the SDK's fake Gladys and a fake TV (loopback)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -73,4 +82,11 @@ test/                             node --test, against the SDK's fake Gladys (in
 - **User-facing text** is bilingual (English and French): action messages,
   manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+  in English. Tests never touch the network (loopback only, for the fake TV).
+- **Encoding.** Every file is UTF-8 without BOM; `test/encoding.test.js`
+  refuses mojibake (UTF-8 text read as Latin-1 and saved again) in the
+  manifest, the docs and these files.
+- **TVs.** The power key and the mute are toggles: read the state from the TV
+  just before acting, never decide on a state in memory; commands are
+  serialized per TV. Never send a power key after a Wake-on-LAN. The pairing
+  keys live in `/data` only: never in logs, messages or device params.

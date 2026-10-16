@@ -1,33 +1,36 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, DEFAULT_CONFIG } from '../src/config.js';
+import { normalizeConfig, parseHost, parseMac } from '../src/config.js';
 
-test('normalizeConfig returns the defaults when called with no argument', () => {
-  assert.deepEqual(normalizeConfig(), DEFAULT_CONFIG);
+test('parseHost: IPv4, host names, pasted URLs; the rest refused', () => {
+  assert.equal(parseHost(' 192.168.1.40 '), '192.168.1.40');
+  assert.equal(parseHost('http://192.168.1.40:55000/nrc/ddd.xml'), '192.168.1.40');
+  assert.equal(parseHost('Viera-Salon.lan'), 'viera-salon.lan');
+  assert.equal(parseHost('192.168.1.300'), undefined);
+  assert.equal(parseHost('bad host'), undefined);
+  assert.equal(parseHost(''), undefined);
+  assert.equal(parseHost('a/<script>'), 'a');
 });
 
-test('normalizeConfig keeps user values over the defaults', () => {
-  const config = normalizeConfig({ latitude: 45.5, longitude: -73.6, unit: 'fahrenheit' });
-  assert.equal(config.latitude, 45.5);
-  assert.equal(config.longitude, -73.6);
-  assert.equal(config.unit, 'fahrenheit');
+test('parseMac: separators, case; broadcast and zero refused', () => {
+  assert.equal(parseMac('A8-13-74-12-34-56'), 'a8:13:74:12:34:56');
+  assert.equal(parseMac('a81374123456'), 'a8:13:74:12:34:56');
+  assert.equal(parseMac('ff:ff:ff:ff:ff:ff'), undefined);
+  assert.equal(parseMac('00:00:00:00:00:00'), undefined);
+  assert.equal(parseMac('a8:13:74'), undefined);
 });
 
-test('normalizeConfig coerces numeric strings coming from a form', () => {
-  const config = normalizeConfig({ latitude: '48.8', longitude: '2.3', poll_frequency: '600' });
-  assert.equal(config.latitude, 48.8);
-  assert.equal(config.longitude, 2.3);
-  assert.equal(config.poll_frequency, 600);
-  assert.equal(typeof config.poll_frequency, 'number');
-});
-
-test('normalizeConfig falls back to the default for a missing numeric field', () => {
-  const config = normalizeConfig({ unit: 'celsius' });
-  assert.equal(config.poll_frequency, DEFAULT_CONFIG.poll_frequency);
-});
-
-test('GLADYS_PREFER_LOCAL defaults to true and only an explicit false disables it', () => {
-  assert.equal(normalizeConfig().GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: true }).GLADYS_PREFER_LOCAL, true);
-  assert.equal(normalizeConfig({ GLADYS_PREFER_LOCAL: false }).GLADYS_PREFER_LOCAL, false);
+test('normalizeConfig: lists, MAC pairs, bounds, invalid entries kept for the status', () => {
+  const config = normalizeConfig({
+    addresses: '192.168.1.40, 192.168.1.40;tv.lan oops!',
+    mac_addresses: '192.168.1.40=a8:13:74:12:34:56, nonsense',
+    poll_interval: 1,
+  });
+  assert.deepEqual(config.addresses, ['192.168.1.40', 'tv.lan']);
+  assert.deepEqual(config.macs, { '192.168.1.40': 'a8:13:74:12:34:56' });
+  assert.deepEqual(config.invalid, ['oops!', 'nonsense']);
+  assert.equal(config.pollInterval, 5);
+  assert.equal(normalizeConfig({ poll_interval: 'x' }).pollInterval, 10);
+  assert.equal(normalizeConfig({ poll_interval: 9999 }).pollInterval, 300);
+  assert.deepEqual(normalizeConfig(), { addresses: [], macs: {}, invalid: [], pollInterval: 10 });
 });
