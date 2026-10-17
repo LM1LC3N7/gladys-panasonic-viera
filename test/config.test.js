@@ -32,5 +32,13 @@ test('normalizeConfig: lists, MAC pairs, bounds, invalid entries kept for the st
   assert.equal(config.pollInterval, 5);
   assert.equal(normalizeConfig({ poll_interval: 'x' }).pollInterval, 10);
   assert.equal(normalizeConfig({ poll_interval: 9999 }).pollInterval, 300);
-  assert.deepEqual(normalizeConfig(), { addresses: [], macs: {}, invalid: [], pollInterval: 10 });
+  assert.deepEqual(normalizeConfig(), {
+    addresses: [],
+    macs: {},
+    wakeAddress: undefined,
+    invalid: [],
+    pollInterval: 10,
+  });
+  assert.equal(normalizeConfig({ wake_broadcast: '192.168.1.255' }).wakeAddress, '192.168.1.255');
+  assert.deepEqual(normalizeConfig({ wake_broadcast: 'everyone' }).invalid, ['everyone']);
 });

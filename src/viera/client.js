@@ -8,6 +8,10 @@
 //   - the PIN pairing, which returns the application id and the key to keep.
 // The session sequence number is restored when a command fails, as the
 // library does. Nothing here logs: the keys and the PIN never leave it.
+//
+// `withBudget(ms)` returns a view of the same client (same credentials, same
+// session) whose requests all fit in `ms`: a Gladys command is acked within
+// 5 seconds, so a command never waits longer than its budget.
 // -----------------------------------------------------------------------------
 
 import { decryptPayload, derivePinKeys, deriveSessionKeys, encryptPayload } from './crypto.js';
@@ -34,13 +38,18 @@ import {
 const DMR_CHANNEL = '<InstanceID>0</InstanceID><Channel>Master</Channel>';
 // NRC actions sent in clear even on the encrypted models.
 const CLEAR_ACTIONS = new Set(['X_GetEncryptSessionId', 'X_DisplayPinCode', 'X_RequestAuth']);
+// What an explicit refusal of the stored keys looks like (anything else is
+// treated as a passing failure, counted by the app).
+const EXPLICIT_REFUSAL = /unauthori[sz]ed|forbidden|not\s+(?:paired|registered)|authenticat/i;
+const MIN_REQUEST_MS = 50;
 
 export class VieraClient {
   /**
    * @param {{ host: string, port?: number, encrypted?: boolean,
    *   credentials?: { appId: string, encKey: string },
    *   request?: typeof defaultRequest, timeoutMs?: number,
-   *   random?: (size: number) => Buffer }} options
+   *   random?: (size: number) => Buffer, onSession?: () => void,
+   *   now?: () => number }} options
    */
   constructor({
     host,
@@ -50,30 +59,70 @@ export class VieraClient {
     request = defaultRequest,
     timeoutMs = 4000,
     random,
+    onSession,
+    now = Date.now,
   }) {
     this.host = host;
     this.port = port;
-    this.encrypted = encrypted;
     this.request = request;
     this.timeoutMs = timeoutMs;
     this.random = random;
-    this.session = undefined;
+    this.onSession = onSession;
+    this.now = now;
+    this.deadline = undefined;
+    // Shared by every budgeted view of this client.
+    this.shared = { encrypted, appId: undefined, keys: undefined, session: undefined };
     this.setCredentials(credentials);
   }
 
+  get encrypted() {
+    return this.shared.encrypted;
+  }
+
+  set encrypted(value) {
+    this.shared.encrypted = value;
+  }
+
+  get appId() {
+    return this.shared.appId;
+  }
+
+  get session() {
+    return this.shared.session;
+  }
+
   setCredentials(credentials) {
-    this.session = undefined;
+    this.shared.session = undefined;
     if (credentials?.appId && credentials?.encKey) {
-      this.appId = credentials.appId;
-      this.keys = deriveSessionKeys(credentials.encKey);
+      this.shared.appId = credentials.appId;
+      this.shared.keys = deriveSessionKeys(credentials.encKey);
     } else {
-      this.appId = undefined;
-      this.keys = undefined;
+      this.shared.appId = undefined;
+      this.shared.keys = undefined;
     }
   }
 
   get paired() {
-    return Boolean(this.appId && this.keys);
+    return Boolean(this.shared.appId && this.shared.keys);
+  }
+
+  /** The same client, every request of which ends within `ms` from now. */
+  withBudget(ms) {
+    const view = Object.create(this);
+    view.deadline = this.now() + ms;
+    return view;
+  }
+
+  requestTimeout() {
+    if (this.deadline === undefined) {
+      return this.timeoutMs;
+    }
+    const left = this.deadline - this.now();
+    if (left < MIN_REQUEST_MS) {
+      // Not "unreachable": nothing was asked, so nothing is known of the TV.
+      throw new TvError(ERROR_KINDS.BUDGET, 'No time left for this command');
+    }
+    return Math.min(this.timeoutMs, left);
   }
 
   async get(path) {
@@ -81,7 +130,7 @@ export class VieraClient {
       host: this.host,
       port: this.port,
       path,
-      timeoutMs: this.timeoutMs,
+      timeoutMs: this.requestTimeout(),
     });
     if (res.status < 200 || res.status >= 300) {
       throw new TvError(ERROR_KINDS.HTTP, `HTTP ${res.status} on ${path}`, { status: res.status });
@@ -115,7 +164,7 @@ export class VieraClient {
         SOAPAction: `"urn:${urn}#${action}"`,
       },
       body: envelope(urn, action, params, prefix),
-      timeoutMs: this.timeoutMs,
+      timeoutMs: this.requestTimeout(),
     });
     if (res.status >= 200 && res.status < 300) {
       return res.body;
@@ -134,12 +183,13 @@ export class VieraClient {
   // --- Encrypted session ------------------------------------------------------
 
   async requestSession() {
+    const { appId, keys } = this.shared;
     if (!this.paired) {
       throw new TvError(ERROR_KINDS.PAIRING_REQUIRED, 'This TV must be paired first');
     }
     const encInfo = encryptPayload(
-      `<X_ApplicationId>${escapeXml(this.appId)}</X_ApplicationId>`,
-      this.keys,
+      `<X_ApplicationId>${escapeXml(appId)}</X_ApplicationId>`,
+      keys,
       this.random,
     );
     let body;
@@ -148,21 +198,33 @@ export class VieraClient {
         URL_NRC,
         URN_REMOTE_CONTROL,
         'X_GetEncryptSessionId',
-        `<X_ApplicationId>${escapeXml(this.appId)}</X_ApplicationId><X_EncInfo>${encInfo}</X_EncInfo>`,
+        `<X_ApplicationId>${escapeXml(appId)}</X_ApplicationId><X_EncInfo>${encInfo}</X_EncInfo>`,
         'u',
       );
     } catch (err) {
-      if (err.kind === ERROR_KINDS.FAULT || err.status === 401 || err.status === 403) {
-        // The TV no longer knows this application (reset, or pairing removed).
+      if (
+        err.status === 401 ||
+        err.status === 403 ||
+        (err.kind === ERROR_KINDS.FAULT && EXPLICIT_REFUSAL.test(err.description ?? ''))
+      ) {
         throw new TvError(ERROR_KINDS.KEYS_REFUSED, 'The TV refused the stored keys', {
           code: err.code,
         });
       }
+      if (err.kind === ERROR_KINDS.FAULT || err.kind === ERROR_KINDS.HTTP) {
+        // A busy or confused TV: not a proof that the keys are gone.
+        throw new TvError(ERROR_KINDS.SESSION_REFUSED, 'The TV did not open a session', {
+          status: err.status,
+          code: err.code,
+          description: err.description,
+        });
+      }
       throw err;
     }
-    const sessionId = this.decrypted(body, 'X_EncResult', 'X_SessionId', this.keys);
-    this.session = { id: sessionId, sequence: 1 };
-    return this.session;
+    const sessionId = this.decrypted(body, 'X_EncResult', 'X_SessionId', keys);
+    this.shared.session = { id: sessionId, sequence: 1 };
+    this.onSession?.();
+    return this.shared.session;
   }
 
   /** Decrypts `outer` of a SOAP answer and reads `inner` from it. */
@@ -189,10 +251,11 @@ export class VieraClient {
 
   /**
    * One NRC command: in clear on the older models, wrapped in the session on
-   * the encrypted ones. A refused encrypted command renews the session once
-   * (it may have expired), never more.
+   * the encrypted ones. The session is renewed once, and only when the TV
+   * says it no longer knows it (HTTP 500 "No such session"); a non-repeatable
+   * command (the power toggle) is never sent twice.
    */
-  async nrc(action, params = '') {
+  async nrc(action, params = '', { repeatable = true } = {}) {
     if (!this.encrypted || CLEAR_ACTIONS.has(action)) {
       return this.soap(URL_NRC, URN_REMOTE_CONTROL, action, params, 'm');
     }
@@ -202,23 +265,31 @@ export class VieraClient {
     try {
       return await this.encryptedCommand(action, params);
     } catch (err) {
-      if (err.kind !== ERROR_KINDS.FAULT && err.kind !== ERROR_KINDS.HTTP) {
+      const expired =
+        err.kind === ERROR_KINDS.FAULT &&
+        err.status === 500 &&
+        /no\s+such\s+session/i.test(err.description ?? '');
+      if (!expired || !repeatable) {
+        if (expired) {
+          this.shared.session = undefined;
+        }
         throw err;
       }
-      this.session = undefined;
+      this.shared.session = undefined;
       return this.encryptedCommand(action, params);
     }
   }
 
   async encryptedCommand(action, params) {
-    if (!this.session) {
+    if (!this.shared.session) {
       await this.requestSession();
     }
-    const session = this.session;
+    const session = this.shared.session;
+    const { appId, keys } = this.shared;
     session.sequence += 1;
     const encInfo = encryptPayload(
       encryptedInner(session.id, session.sequence, URN_REMOTE_CONTROL, action, params),
-      this.keys,
+      keys,
       this.random,
     );
     let body;
@@ -227,14 +298,14 @@ export class VieraClient {
         URL_NRC,
         URN_REMOTE_CONTROL,
         'X_EncryptedCommand',
-        `<X_ApplicationId>${escapeXml(this.appId)}</X_ApplicationId><X_EncInfo>${encInfo}</X_EncInfo>`,
+        `<X_ApplicationId>${escapeXml(appId)}</X_ApplicationId><X_EncInfo>${encInfo}</X_EncInfo>`,
         'u',
       );
     } catch (err) {
       session.sequence -= 1;
       throw err;
     }
-    return this.decrypted(body, 'X_EncResult', undefined, this.keys);
+    return this.decrypted(body, 'X_EncResult', undefined, keys);
   }
 
   // --- Pairing ----------------------------------------------------------------
@@ -257,7 +328,8 @@ export class VieraClient {
 
   /**
    * Sends the PIN typed by the user, encrypted with the challenge keys; on
-   * success keeps and returns the credentials, after opening a session.
+   * success keeps and returns the credentials. The session is opened by the
+   * caller once they are saved.
    * @returns {Promise<{ appId: string, encKey: string }>}
    */
   async authorizePin(challenge, pin) {
@@ -286,18 +358,19 @@ export class VieraClient {
     }
     this.encrypted = true;
     this.setCredentials({ appId, encKey });
-    await this.requestSession();
     return { appId, encKey };
   }
 
   // --- Commands ---------------------------------------------------------------
 
   async sendKey(name) {
-    const code = KEYS[name];
+    const code = Object.hasOwn(KEYS, name) ? KEYS[name] : undefined;
     if (!code) {
       throw new TvError(ERROR_KINDS.PROTOCOL, `Unknown key "${String(name).slice(0, 32)}"`);
     }
-    await this.nrc('X_SendKey', `<X_KeyEvent>${code}</X_KeyEvent>`);
+    await this.nrc('X_SendKey', `<X_KeyEvent>${code}</X_KeyEvent>`, {
+      repeatable: name !== 'power',
+    });
   }
 
   async launchApp(id) {
@@ -317,7 +390,8 @@ export class VieraClient {
   }
 
   async getApps() {
-    return parseAppList(await this.nrc('X_GetAppList', ''));
+    // The library sends Python's None as the (empty) argument: kept as is.
+    return parseAppList(await this.nrc('X_GetAppList', 'None'));
   }
 
   async getVolume() {
@@ -340,15 +414,16 @@ export class VieraClient {
       'SetVolume',
       `${DMR_CHANNEL}<DesiredVolume>${value}</DesiredVolume>`,
     );
+    return value;
   }
 
   async getMute() {
     const body = await this.soap(URL_DMR, URN_RENDERING_CONTROL, 'GetMute', DMR_CHANNEL);
     const mute = tagText(body, 'CurrentMute');
-    if (mute === undefined) {
+    if (mute !== '0' && mute !== '1' && !/^(true|false)$/i.test(mute ?? '')) {
       throw new TvError(ERROR_KINDS.PROTOCOL, 'CurrentMute missing in the answer');
     }
-    return mute !== '0' && mute.toLowerCase() !== 'false';
+    return mute === '1' || mute.toLowerCase() === 'true';
   }
 
   async setMute(muted) {

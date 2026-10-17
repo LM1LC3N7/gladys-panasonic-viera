@@ -6,7 +6,8 @@
 
 import { request as httpRequest } from 'node:http';
 
-const MAX_BODY = 512 * 1024;
+// The largest answer of a TV (application list) is a few kilobytes.
+export const MAX_BODY = 64 * 1024;
 
 /** The kinds of failure the rest of the code tells apart. */
 export const ERROR_KINDS = Object.freeze({
@@ -15,7 +16,12 @@ export const ERROR_KINDS = Object.freeze({
   FAULT: 'fault',
   PROTOCOL: 'protocol',
   PAIRING_REQUIRED: 'pairing_required',
+  /** An explicit refusal of the stored pairing keys. */
   KEYS_REFUSED: 'keys_refused',
+  /** No session this time, for a reason that does not prove the keys are gone. */
+  SESSION_REFUSED: 'session_refused',
+  /** The time a command was given ran out before this request. */
+  BUDGET: 'budget',
   INVALID_PIN: 'invalid_pin',
 });
 

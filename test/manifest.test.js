@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { ACTIONS, POLL_INTERVAL } from '../src/constants.js';
-import { SSDP_ST } from '../src/viera/soap.js';
+import { SSDP_ST, SSDP_ST_SERVICE } from '../src/viera/soap.js';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = JSON.parse(read('gladys-assistant-integration.json'));
@@ -68,7 +68,10 @@ test('every text is in English and French', () => {
 });
 
 test('the SSDP search of the TVs is the only capture; Wake-on-LAN is declared', () => {
-  assert.deepEqual(manifest.network_discovery, [{ type: 'ssdp', st: SSDP_ST }]);
+  assert.deepEqual(manifest.network_discovery, [
+    { type: 'ssdp', st: SSDP_ST },
+    { type: 'ssdp', st: SSDP_ST_SERVICE },
+  ]);
   assert.equal(manifest.network_wake, true);
   assert.equal(manifest.containers, undefined);
 });

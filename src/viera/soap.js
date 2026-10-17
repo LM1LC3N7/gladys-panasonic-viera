@@ -17,6 +17,8 @@ export const URN_RENDERING_CONTROL = 'schemas-upnp-org:service:RenderingControl:
 
 /** The SSDP search target of the TVs' remote control service. */
 export const SSDP_ST = 'urn:panasonic-com:device:p00RemoteController:1';
+/** Some models answer only for the service they publish. */
+export const SSDP_ST_SERVICE = 'urn:panasonic-com:service:p00NetworkControl:1';
 
 const ENTITIES = { lt: '<', gt: '>', amp: '&', quot: '"', apos: "'" };
 
@@ -44,15 +46,88 @@ export function decodeXml(value) {
   });
 }
 
+const NAME_CHAR = /[\w.-]/;
+const SPACE = /\s/;
+const MAX_PREFIX = 64;
+
+/** Index of the `<` of `<name` or `<prefix:name` ending right before `index`, or -1. */
+function tagOpenBefore(text, index, slash) {
+  let i = index - 1;
+  if (text[i] === ':') {
+    let length = 0;
+    i -= 1;
+    while (i >= 0 && length <= MAX_PREFIX && NAME_CHAR.test(text[i])) {
+      i -= 1;
+      length += 1;
+    }
+    if (length === 0 || length > MAX_PREFIX) {
+      return -1;
+    }
+  }
+  if (slash) {
+    if (text[i] !== '/') {
+      return -1;
+    }
+    i -= 1;
+  }
+  return text[i] === '<' ? i : -1;
+}
+
 /**
  * The text of the first element named `name`, whatever its namespace prefix,
- * entities decoded; undefined when absent.
+ * entities decoded; undefined when absent. Linear in the size of the answer
+ * (indexOf for the opening tag, then for the closing one), whatever it holds.
  */
 export function tagText(xml, name) {
-  const match = new RegExp(
-    `<(?:[\\w.-]+:)?${name}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[\\w.-]+:)?${name}\\s*>`,
-  ).exec(String(xml ?? ''));
-  return match ? decodeXml(match[1]).trim() : undefined;
+  const text = String(xml ?? '');
+  const length = name.length;
+  let nextGt = -1;
+  let from = 0;
+  for (;;) {
+    const index = text.indexOf(name, from);
+    if (index === -1) {
+      return undefined;
+    }
+    from = index + 1;
+    const after = text[index + length];
+    if ((after !== '>' && !SPACE.test(after ?? '')) || tagOpenBefore(text, index, false) === -1) {
+      continue;
+    }
+    let gt = index + length;
+    if (after !== '>') {
+      if (nextGt < gt) {
+        nextGt = text.indexOf('>', gt);
+      }
+      if (nextGt === -1) {
+        return undefined;
+      }
+      gt = nextGt;
+      if (text[gt - 1] === '/') {
+        return '';
+      }
+    }
+    const start = gt + 1;
+    let search = start;
+    for (;;) {
+      const close = text.indexOf(name, search);
+      if (close === -1) {
+        return undefined;
+      }
+      search = close + 1;
+      let end = close + length;
+      let spaces = 0;
+      while (spaces < 16 && SPACE.test(text[end] ?? '')) {
+        end += 1;
+        spaces += 1;
+      }
+      if (text[end] === '>') {
+        const open = tagOpenBefore(text, close, true);
+        if (open !== -1) {
+          return decodeXml(text.slice(start, open)).trim();
+        }
+      }
+    }
+  }
 }
 
 /** The SOAP envelope of one action; `params` is already-escaped XML. */

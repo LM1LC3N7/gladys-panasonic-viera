@@ -34,13 +34,16 @@ ask for a PIN once:
 
 1. Turn the TV on.
 2. In the integration configuration, use **Start pairing** with the TV's IP
-   address. The TV shows a 4-digit PIN.
+   address. The TV shows a PIN (4 to 8 digits, usually 4).
 3. Within 5 minutes, use **Finish pairing** with that PIN.
 
 The integration then keeps the keys given by the TV in its own data folder
-(`/data`); they are never sent to Gladys nor written to the logs. If the TV is
-reset and refuses these keys, the integration status says so: pair again.
-Older TVs need no pairing.
+(`/data`); they are never sent to Gladys nor written to the logs. They stay
+there when the device is deleted from Gladys (a "forget a TV" action is
+planned). If the TV is reset and explicitly refuses these keys (or refuses the
+session three times, minutes apart, while on), the integration status says
+so: pair again. The keys are still tried again every 30 minutes, in case the
+refusal was passing. Older TVs need no pairing.
 
 Before pairing, volume and mute already work; keys, power and applications do
 not.
@@ -63,19 +66,33 @@ they do not show the state.
 ## Turning the TV on
 
 The power key toggles: the integration reads the state from the TV just
-before acting and sends nothing when the TV already is in the wanted state.
+before acting (1.5 s at most) and sends nothing when the TV already is in the
+wanted state. "On" means "the TV answers volume requests"; "off" means
+"nothing answers". When the TV answers something unexpected, the state is
+**unknown**: nothing is published and no power key is sent.
 
 - TV in **network standby** ("Powered On by Apps" enabled): the power key is
   enough.
 - TV in **deep standby** (it answers nothing at all): **Wake-on-LAN** is
   needed. Gladys sends the packet for the integration, to the MAC seen by the
   search, or the one typed in "MAC addresses for Wake-on-LAN"
-  (`192.168.1.40=a8:13:74:12:34:56`). The integration then waits up to 20
-  seconds for the TV to answer, without sending a power key (it could turn
-  off a TV that is booting).
+  (`192.168.1.40=a8:13:74:12:34:56`). With a known MAC, "turn on" always sends
+  the packet; if the TV still answers on its network port, the power key is
+  sent first. The command is confirmed to Gladys at once, then the
+  integration waits up to 20 seconds for the TV in the background, sending the
+  packet again every 2.5 seconds, never a power key (it could turn off a TV
+  that is booting). If a TV does not wake up, try the broadcast address of
+  your network in "Wake-on-LAN broadcast address".
 
-Known limit: a TV in standby that still answers volume requests shows as on,
-and "turn on" then sends nothing. To be checked on real models.
+Known limits, in both directions (to be checked on real models):
+
+- a TV in standby that still answers volume requests shows as **on**: "turn
+  on" then sends nothing (but Wake-on-LAN, when the MAC is known);
+- a TV that is on but does not answer volume requests shows as **off**: "turn
+  on" would then send the power key and turn it off.
+
+Workaround in both cases: the "Remote key" dropdown, value **Power**, sends
+the power key as is, without reading the state.
 
 ## Settings
 

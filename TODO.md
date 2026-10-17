@@ -27,9 +27,13 @@ up to date at the end of every milestone.
       answers as fixtures, fix what differs. To check first:
   - the power state: does a TV in standby with "Powered On by Apps" (or
     network standby) still answer `GetMute` on DMR? Then it shows as on, and
-    "turn on" sends nothing;
+    "turn on" sends nothing (but Wake-on-LAN). And the other way: a TV on
+    whose DMR does not answer shows as off. A better source to evaluate:
+    `X_ScreenState` through a UPnP event subscription (the reference library
+    subscribes to the NRC service events);
   - whether the encrypted session expires, and which error the TV answers
-    then (renewed once today, on any SOAP fault or HTTP error);
+    then (renewed once today, only on HTTP 500 "No such session"); what an
+    explicit refusal of the keys looks like (401/403, "Unauthorized"?);
   - the `X_GetAppList` format on 2018+ models, and the product ids of the
     known applications in Europe;
   - the HDMI 1-4 direct keys on each generation (some models may only know
@@ -60,12 +64,27 @@ up to date at the end of every milestone.
   description (lower case, without `uuid:`), never the address. Feature keys
   are frozen: `power`, `volume`, `mute`, `source`, `app`, `key`, and the
   buttons of `BUTTONS` in `src/constants.js`.
-- Power: "on" means "DMR answers `GetMute`". The power key is a toggle, so the
-  state is read from the TV just before acting and nothing is sent when it
-  already matches; commands are serialized per TV. Turning on: with a MAC,
-  Wake-on-LAN then up to 20 s of waiting, and never a power key after it (a
-  TV still booting would be turned off); without a MAC, the power key (works
-  from network standby / "Powered On by Apps").
+- Power: "on" means "DMR answers `GetMute`", "off" means "nothing answers"
+  (connection refused, reset or timeout); an HTTP error, a SOAP fault or an
+  unreadable answer is **unknown**: nothing published, no toggle sent. The
+  power key is a toggle, so the state is read from the TV just before acting
+  (1.5 s at most) and nothing is sent when it already matches; commands are
+  serialized per TV.
+- Gladys acks a command within 5 s: every command has a 4.2 s budget counted
+  from the request of Gladys (the wait in the per-TV queue included), shared
+  by all its requests (`VieraClient.withBudget`); a request with no time left
+  is "budget", read as an unknown state, never as "off". Background work in
+  the queue (application list, slow key retry) gets 1.5 s.
+- Turning on with a MAC: Wake-on-LAN always (unknown state included); if the
+  state is off but port 55000 answers (network standby), the power key first,
+  then the packet. The command is acked right after the packet; the TV is
+  then waited for 20 s in the background, the packet sent again every 2.5 s
+  (Gladys allows one per 2 s, a 429 is left to the next try), never a power
+  key after it. Without a MAC: the power key when off, an error when unknown
+  or unreachable. Optional subnet broadcast (`wake_broadcast`). `stop()`
+  cancels the waits and rechecks.
+- Workaround for a wrong state, documented: the "Remote key" dropdown, value
+  `power`, sends the raw key without reading the state.
 - Mute is a Gladys push button (`television`/`volume-mute`): each press reads
   the mute from the TV and sets the opposite (lesson of gladys-denon-avr).
 - Volume and mute use DMR (RenderingControl), never encrypted: they work
@@ -76,15 +95,33 @@ up to date at the end of every milestone.
   are strings, validated against the options before anything is sent). The
   current source and application are not read back (no state published).
 - Pairing: two configuration buttons ("Start pairing" with the address,
-  "Finish pairing" with the PIN), one pairing at a time, 5 minutes. A refused
-  PIN ends the attempt (the TV drops its challenge); an unreachable TV keeps
-  it. The keys are written to `/data` at once (mode 0600), never logged, never
-  sent to Gladys (not in device params).
-- Keys refused by the TV (`X_GetEncryptSessionId` fault, 401/403): marked
-  once, the status asks for a new pairing, and no NRC request goes to that TV
-  until then (no renewal loop). An encrypted command refused by a fault or an
-  HTTP error renews the session once, the sequence number restored as the
-  library does.
+  "Finish pairing" with the PIN, 4 to 8 digits), one pairing at a time, 5
+  minutes. A refused PIN ends the attempt (the TV drops its challenge); an
+  unreachable TV keeps it. The keys are written to `/data` at once (mode 0600) and before the first session is asked, never logged, never sent to
+  Gladys (not in device params). They stay in `/data` when the device is
+  deleted: a "forget a TV" action is planned for milestone 3. A Gladys that
+  sends no `fields` gets "update Gladys".
+- Keys refused: only on an explicit refusal (HTTP 401/403, or a fault saying
+  unauthorized / forbidden / not paired / authentication) or after 3 session
+  refusals at least 1 minute apart while the TV is surely on; anything else
+  (e.g. "Action failed") is a passing error. Any session obtained clears the
+  mark. Marked keys are tried again every 30 minutes (on a command or while
+  polling a TV that is on), never in a loop. The application list is only
+  asked of a TV surely on, and asked again after 10 minutes when it failed.
+- Encrypted session: renewed once, only on HTTP 500 "No such session"; the
+  power key is never sent twice; the sequence number is restored on failure
+  as the library does. `X_GetAppList` is sent with `None` as its argument,
+  like the library.
+- An unreadable `/data/viera.json` is renamed `viera.json.bad` (0600) and
+  reported in the status; the TVs are found again from the addresses and the
+  search.
+- Answers are capped at 64 KB and read with a linear `tagText` (indexOf of the
+  opening then the closing tag), no backtracking regular expression.
+- Crypto checked against fixed vectors computed in Python 3.13 from a hand
+  port of the library's functions over a pure-Python AES-128 (verified with
+  the FIPS-197 vector): pycryptodome is not installed here.
+- SSDP: both search targets are declared (`p00RemoteController` device and
+  `p00NetworkControl` service).
 - Encrypted answers: the TV's HMAC is not checked (the library does not
   either, and its presence is not certain); the payload is cut at the first
   NUL as the library does. LAN only.

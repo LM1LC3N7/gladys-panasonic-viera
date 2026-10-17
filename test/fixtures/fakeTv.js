@@ -94,9 +94,21 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
     /** appId -> keyword (the pairings this TV accepted) */
     pairings: new Map(),
     sessions: new Map(),
+    /** Sessions opened so far. */
+    sessionCount: 0,
     lastSequence: 0,
     /** Number of encrypted commands to refuse (an expired session). */
     refuseCommands: 0,
+    /** Fault answered to that many encrypted commands (not a session problem). */
+    failCommands: 0,
+    /** Number of session requests refused with "Action failed" (valid keys). */
+    sessionFaults: 0,
+    /** DMR answers a SOAP fault (state unknown). */
+    dmrFault: false,
+    /** The TV accepts connections but never answers. */
+    silent: false,
+    /** Requests received, as "METHOD path action". */
+    requests: [],
     /** Wake-on-LAN simulation: the TV switches on when woken. */
     wake() {
       this.reachable = true;
@@ -162,6 +174,10 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
       if (!keyword) {
         return [500, fault(401, 'Unauthorized')];
       }
+      if (tv.sessionFaults > 0) {
+        tv.sessionFaults -= 1;
+        return [500, fault(501, 'Action failed')];
+      }
       const keys = deriveSessionKeys(keyword);
       const encInfo = tagText(body, 'X_EncInfo');
       const plain = decryptPayload(encInfo, keys);
@@ -171,7 +187,8 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
       ) {
         return [500, fault(402, 'Bad session request')];
       }
-      const sessionId = String(100 + tv.sessions.size);
+      tv.sessionCount += 1;
+      const sessionId = String(100 + tv.sessionCount);
       tv.sessions.set(sessionId, appId);
       tv.lastSequence = 1;
       const result = encryptPayload(
@@ -197,7 +214,12 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
       tv.calls.push({ sessionId, sequence });
       if (tv.refuseCommands > 0) {
         tv.refuseCommands -= 1;
-        return [500, fault(403, 'Session expired')];
+        tv.sessions.delete(sessionId);
+        return [500, fault(403, 'No such session')];
+      }
+      if (tv.failCommands > 0) {
+        tv.failCommands -= 1;
+        return [500, fault(501, 'Action failed')];
       }
       if (tv.sessions.get(sessionId) !== appId || !(sequence > tv.lastSequence)) {
         return [500, fault(403, 'Bad session')];
@@ -225,6 +247,9 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
 
   function dmr(action, body) {
     const urn = 'schemas-upnp-org:service:RenderingControl:1';
+    if (tv.dmrFault) {
+      return [500, fault(501, 'Action failed')];
+    }
     if (action === 'GetVolume') {
       return [200, response(action, `<CurrentVolume>${tv.volume}</CurrentVolume>`, urn)];
     }
@@ -248,6 +273,12 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
     req.on('end', () => {
       const body = Buffer.concat(chunks).toString('utf8');
       const isDmr = req.url === '/dmr/control_0';
+      tv.requests.push(
+        `${req.method} ${req.url} ${/#(\w+)"?$/.exec(req.headers.soapaction ?? '')?.[1] ?? ''}`.trim(),
+      );
+      if (tv.silent) {
+        return;
+      }
       if (!tv.reachable || (isDmr && !tv.dmrReachable)) {
         req.socket.destroy();
         return;

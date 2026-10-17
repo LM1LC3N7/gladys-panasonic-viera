@@ -62,15 +62,37 @@ export const ACTIONS = Object.freeze({
 export const POLL_INTERVAL = Object.freeze({ min: 5, max: 300, default: 10 });
 
 export const TIMINGS = Object.freeze({
-  /** One HTTP exchange with a TV. */
+  /** One HTTP exchange with a TV (polling, search, pairing). */
   httpTimeout: 4000,
+  /**
+   * A Gladys command is acked within 5 s: the state read before it gets
+   * `preRead`, the whole command (read included) `commandBudget`.
+   */
+  preRead: 1_500,
+  commandBudget: 4_200,
   /** A typed address that did not answer is asked again after this. */
   probeRetry: 60_000,
   /** The PIN displayed by the TV is accepted for this long. */
   pairingTtl: 5 * 60_000,
-  /** After a Wake-on-LAN packet, how long the TV is waited for, and how often asked. */
+  /**
+   * After a Wake-on-LAN packet (the command is already acked), how long the
+   * TV is waited for in the background; the packet is sent again every
+   * `wakeStep` (Gladys allows one every 2 s).
+   */
   wakeWait: 20_000,
-  wakeStep: 2_000,
+  wakeStep: 2_500,
+  /**
+   * Session refusals that do not explicitly refuse the keys: counted only
+   * while the TV is on and at least `refusalSpacing` apart; `refusalLimit` of
+   * them mark the keys refused. Refused keys are tried again every `keysRetry`.
+   */
+  refusalSpacing: 60_000,
+  refusalLimit: 3,
+  keysRetry: 30 * 60_000,
+  /** A failed or empty application list is asked again after this. */
+  appsRetry: 10 * 60_000,
+  /** TVs asked at once by "Check the TVs". */
+  checkConcurrency: 4,
   /** After a power key, the state is read again this much later. */
   recheckDelay: 3_000,
   /** Writes to /data are grouped. */

@@ -12,7 +12,10 @@
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-panasonic-viera/main/cover.png",
   "categories": ["multimedia"],
   "transports": ["local"],
-  "network_discovery": [{ "type": "ssdp", "st": "urn:panasonic-com:device:p00RemoteController:1" }],
+  "network_discovery": [
+    { "type": "ssdp", "st": "urn:panasonic-com:device:p00RemoteController:1" },
+    { "type": "ssdp", "st": "urn:panasonic-com:service:p00NetworkControl:1" }
+  ],
   "network_wake": true,
   "config_schema": [
     {
@@ -68,6 +71,21 @@
       "default": ""
     },
     {
+      "key": "wake_broadcast",
+      "type": "string",
+      "label": {
+        "en": "Wake-on-LAN broadcast address (optional)",
+        "fr": "Adresse de diffusion du Wake-on-LAN (facultatif)"
+      },
+      "description": {
+        "en": "Only if a TV does not wake up: the broadcast address of your network, for example 192.168.1.255. Empty: 255.255.255.255.",
+        "fr": "Seulement si une TV ne se réveille pas : l'adresse de diffusion de votre réseau, par exemple 192.168.1.255. Vide : 255.255.255.255."
+      },
+      "placeholder": { "en": "192.168.1.255", "fr": "192.168.1.255" },
+      "required": false,
+      "default": ""
+    },
+    {
       "key": "poll_interval",
       "type": "number",
       "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
@@ -85,8 +103,8 @@
       "type": "section",
       "label": { "en": "Pairing (models from 2018 on)", "fr": "Appairage (modèles depuis 2018)" },
       "description": {
-        "en": "Recent TVs encrypt their remote control and ask for a PIN once. Turn the TV on, press \"Start pairing\" with its IP address: the TV shows a 4-digit PIN. Type it in \"Finish pairing\" within 5 minutes. The keys the TV gives are kept by the integration only. Older TVs need no pairing. Volume and mute work even before pairing.",
-        "fr": "Les TV récentes chiffrent leur télécommande et demandent une fois un code PIN. Allumez la TV, utilisez « Démarrer l'appairage » avec son adresse IP : la TV affiche un code PIN à 4 chiffres. Saisissez-le dans « Terminer l'appairage » dans les 5 minutes. Les clés données par la TV sont gardées par l'intégration seule. Les TV plus anciennes n'ont pas besoin d'appairage. Le volume et la sourdine fonctionnent même avant l'appairage."
+        "en": "Recent TVs encrypt their remote control and ask for a PIN once. Turn the TV on, press \"Start pairing\" with its IP address: the TV shows a PIN (4 to 8 digits). Type it in \"Finish pairing\" within 5 minutes. The keys the TV gives are kept by the integration only, in its data folder (they stay there after a device is deleted). Older TVs need no pairing. Volume and mute work even before pairing.",
+        "fr": "Les TV récentes chiffrent leur télécommande et demandent une fois un code PIN. Allumez la TV, utilisez « Démarrer l'appairage » avec son adresse IP : la TV affiche un code PIN (4 à 8 chiffres). Saisissez-le dans « Terminer l'appairage » dans les 5 minutes. Les clés données par la TV sont gardées par l'intégration seule, dans son dossier de données (elles y restent après la suppression d'un appareil). Les TV plus anciennes n'ont pas besoin d'appairage. Le volume et la sourdine fonctionnent même avant l'appairage."
       }
     }
   ],

@@ -37,14 +37,19 @@ télécommande et demandent un code PIN une seule fois :
 
 1. Allumez la TV.
 2. Dans la configuration de l'intégration, utilisez **Démarrer l'appairage**
-   avec l'adresse IP de la TV. La TV affiche un code PIN à 4 chiffres.
+   avec l'adresse IP de la TV. La TV affiche un code PIN (4 à 8 chiffres,
+   en général 4).
 3. Dans les 5 minutes, utilisez **Terminer l'appairage** avec ce code.
 
 L'intégration garde alors les clés données par la TV dans son propre dossier
 de données (`/data`) ; elles ne sont jamais envoyées à Gladys ni écrites dans
-les logs. Si la TV est réinitialisée et refuse ces clés, l'état de
-l'intégration le signale : refaites l'appairage. Les TV plus anciennes n'ont
-pas besoin d'appairage.
+les logs. Elles y restent quand l'appareil est supprimé de Gladys (une action
+« oublier une TV » est prévue). Si la TV est réinitialisée et refuse
+explicitement ces clés (ou refuse la session trois fois, à quelques minutes
+d'intervalle, alors qu'elle est allumée), l'état de l'intégration le signale :
+refaites l'appairage. Les clés sont tout de même réessayées toutes les 30
+minutes, au cas où le refus était passager. Les TV plus anciennes n'ont pas
+besoin d'appairage.
 
 Avant l'appairage, le volume et la sourdine fonctionnent déjà ; les touches,
 la marche/arrêt et les applications, non.
@@ -67,20 +72,37 @@ commander, pas à afficher l'état.
 ## Allumer la TV
 
 La touche marche/arrêt inverse l'état : l'intégration lit donc l'état de la
-TV juste avant d'agir et n'envoie rien si la TV est déjà dans l'état voulu.
+TV juste avant d'agir (1,5 seconde au plus) et n'envoie rien si la TV est déjà
+dans l'état voulu. « Allumée » veut dire « la TV répond aux demandes de
+volume » ; « éteinte », « rien ne répond ». Quand la TV répond quelque chose
+d'inattendu, l'état est **inconnu** : rien n'est publié et aucune touche
+marche/arrêt n'est envoyée.
 
 - TV en **veille réseau** (« Allumage par les applications » activé) : la
   touche marche/arrêt suffit.
 - TV en **veille profonde** (elle ne répond plus du tout) : il faut le
   **Wake-on-LAN**. Gladys envoie le paquet pour l'intégration, à la MAC vue
   par la recherche, ou à celle saisie dans « Adresses MAC pour le
-  Wake-on-LAN » (`192.168.1.40=a8:13:74:12:34:56`). L'intégration attend
-  ensuite jusqu'à 20 secondes que la TV réponde, sans envoyer de touche
-  marche/arrêt (elle pourrait éteindre une TV en train de démarrer).
+  Wake-on-LAN » (`192.168.1.40=a8:13:74:12:34:56`). Avec une MAC connue,
+  « allumer » envoie toujours le paquet ; si la TV répond encore sur son port
+  réseau, la touche marche/arrêt est envoyée d'abord. La commande est
+  confirmée tout de suite à Gladys, puis l'intégration attend jusqu'à 20
+  secondes la TV en arrière-plan, en renvoyant le paquet toutes les 2,5
+  secondes, jamais de touche marche/arrêt (elle pourrait éteindre une TV en
+  train de démarrer). Si une TV ne se réveille pas, essayez l'adresse de
+  diffusion de votre réseau dans « Adresse de diffusion du Wake-on-LAN ».
 
-Limite connue : une TV en veille qui répond encore aux demandes de volume
-apparaît allumée, et « allumer » n'envoie alors rien. À vérifier sur de vrais
-modèles.
+Limites connues, dans les deux sens (à vérifier sur de vrais modèles) :
+
+- une TV en veille qui répond encore aux demandes de volume apparaît
+  **allumée** : « allumer » n'envoie alors rien (sauf le Wake-on-LAN, si la
+  MAC est connue) ;
+- une TV allumée qui ne répond pas aux demandes de volume apparaît
+  **éteinte** : « allumer » enverrait alors la touche marche/arrêt et
+  l'éteindrait.
+
+Contournement dans les deux cas : la liste « Touche », valeur **Power**,
+envoie la touche marche/arrêt telle quelle, sans lire l'état.
 
 ## Réglages
 

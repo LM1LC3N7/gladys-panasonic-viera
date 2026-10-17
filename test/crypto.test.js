@@ -17,6 +17,39 @@ import {
 const IV = Buffer.from([...Array(16).keys()]); // 00 01 02 ... 0f
 const IV_BASE64 = IV.toString('base64');
 
+// Fixed vectors produced in Python 3.13 by a hand port of
+// panasonic_viera/remote_control.py (_derive_session_keys, the key schedule of
+// authorize_pin_code, _encrypt_soap_payload and pad, with random bytes 01..0c)
+// over a pure-Python AES-128 checked against the FIPS-197 vector (pycryptodome
+// is not installed on the development machine).
+const PY = {
+  random: () => Buffer.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+  keyword: 'EBESExQVFhcYGRobHB0eHw==',
+  sessionKey: '12131011161714151a1b18191e1f1c1d',
+  sessionText: '<X_ApplicationId>APP1234</X_ApplicationId>',
+  sessionPayload:
+    'tFoS5et0jrCChlUhgwQz95NELzOWD4hH8HUJOL5gzNqE1JPW0+NaVVFZJpuqWKLAui2HF71tVsxt2qH6imEQdpUBAqmhD0PA6TQdmo8FjC3do9g6vhadCHy5dcQhImcC',
+  challenge: 'oKGio6SlpqeoqaqrrK2urw==',
+  pinKey: '5c5d5e5f58595a5b5455565750515253',
+  pinHmac: 'b76afa63162d034ee4892728b09b7ce207e8077d0a3fdd5f20660b558ae094f9',
+  pinText: '<X_PinCode>4821</X_PinCode>',
+  pinPayload:
+    'CwQUML8qvPn/Jtw62KE2UPTHBW8PHg+5H1lmpi1P/jnDYOqHN/KnYH810IhZVxcsfhUyPS0CIxysAPDMbp73BesushD97Cj4MCk4fjbdsqE=',
+};
+
+test('fixed vectors from the Python library: keys and payloads identical', () => {
+  const session = deriveSessionKeys(PY.keyword);
+  assert.equal(session.key.toString('hex'), PY.sessionKey);
+  assert.equal(encryptPayload(PY.sessionText, session, PY.random), PY.sessionPayload);
+  assert.equal(decryptPayload(PY.sessionPayload, session), PY.sessionText);
+
+  const pin = derivePinKeys(PY.challenge);
+  assert.equal(pin.key.toString('hex'), PY.pinKey);
+  assert.equal(pin.hmacKey.toString('hex'), PY.pinHmac);
+  assert.equal(encryptPayload(PY.pinText, pin, PY.random), PY.pinPayload);
+  assert.equal(decryptPayload(PY.pinPayload, pin), PY.pinText);
+});
+
 test('session keys: the keyword is the IV, swapped by pairs into the key, twice into the HMAC key', () => {
   const { key, iv, hmacKey } = deriveSessionKeys(IV_BASE64);
   assert.deepEqual(iv, IV);

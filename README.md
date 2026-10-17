@@ -34,17 +34,21 @@ Gladys ⇄ SDK ⇄ src/handlers.js ⇄ src/app.js (VieraApp)
   protocol). The SSDP `LOCATION` header is not followed; the `source_mac` of
   the answer is kept for Wake-on-LAN.
 - **Polling** (own timer, 5 to 300 s): `GetMute` and `GetVolume` on
-  `/dmr/control_0` (RenderingControl, never encrypted). An answer means "on".
-- **Commands**: serialized per TV. Keys (`X_SendKey`) and applications
-  (`X_LaunchApp`) on `/nrc/control_0`, wrapped in `X_EncryptedCommand` with a
-  session id and a sequence number on the encrypted models. Power and mute are
-  toggles: the state is read from the TV just before. Power on from deep
-  standby: `gladys.wakeOnLan(mac)` (manifest `network_wake: true`), then wait;
-  never a power key after a Wake-on-LAN.
+  `/dmr/control_0` (RenderingControl, never encrypted). An answer means "on",
+  no answer "off", any other answer "unknown" (nothing published).
+- **Commands**: serialized per TV, each within a 4.2 s budget (Gladys acks in
+  5 s). Keys (`X_SendKey`) and applications (`X_LaunchApp`) on
+  `/nrc/control_0`, wrapped in `X_EncryptedCommand` with a session id and a
+  sequence number on the encrypted models. Power and mute are toggles: the
+  state is read from the TV just before, never acted on when unknown. Power on
+  with a MAC: `gladys.wakeOnLan(mac)` (manifest `network_wake: true`), acked at
+  once, the TV waited for in the background; never a power key after a
+  Wake-on-LAN.
 - **Pairing**: `X_DisplayPinCode` returns a challenge, the PIN goes back
   encrypted with keys derived from it (`X_RequestAuth`), the TV answers an
-  application id and a key, kept in `/data` (mode 0600), never logged. A
-  refused key stops every NRC request to that TV until a new pairing.
+  application id and a key, kept in `/data` (mode 0600), never logged. Keys
+  explicitly refused (or refused 3 times while the TV is on) pause the NRC
+  requests to that TV, tried again every 30 minutes.
 
 ## Development
 

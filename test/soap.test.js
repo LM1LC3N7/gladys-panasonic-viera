@@ -26,6 +26,30 @@ test('tagText ignores namespace prefixes and decodes entities', () => {
     escapeXml(`<a href="x">'&'</a>`),
     '&lt;a href=&quot;x&quot;&gt;&apos;&amp;&apos;&lt;/a&gt;',
   );
+  // Names inside other names, closing prefixes, self-closing elements.
+  assert.equal(tagText('<X_KeyEvent>a</X_KeyEvent><X_Key>b</X_Key>', 'X_Key'), 'b');
+  assert.equal(tagText('<u:X_Key>c</X_Key >', 'X_Key'), 'c');
+  assert.equal(tagText('<X_Key/><X_Key>d</X_Key>', 'X_Key'), 'd');
+  assert.equal(tagText('<X_Key />', 'X_Key'), '');
+  assert.equal(tagText('<X_Key>no end', 'X_Key'), undefined);
+  assert.equal(tagText('</X_Key><X_Key>e</a:X_Key>', 'X_Key'), 'e');
+});
+
+test('tagText stays linear on a hostile 512 KB answer', () => {
+  const hostile = [
+    '<X_Key '.repeat(75_000),
+    `<X_Key>${'X_Key'.repeat(105_000)}`,
+    '<a:'.repeat(175_000) + 'X_Key>',
+    `<X_Key>${'</X_Key '.repeat(66_000)}`,
+  ];
+  for (const body of hostile) {
+    assert.ok(body.length >= 512 * 1024, `${body.length}`);
+    const started = performance.now();
+    tagText(body, 'X_Key');
+    tagText(body, 'CurrentVolume');
+    const elapsed = performance.now() - started;
+    assert.ok(elapsed < 200, `${elapsed} ms`);
+  }
 });
 
 test('the envelope and the encrypted inner command', () => {

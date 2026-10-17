@@ -6,6 +6,14 @@
 const list = (names) => names.join(', ');
 
 export const T = {
+  updateGladys: {
+    en: 'This Gladys does not send the fields of this button: update Gladys.',
+    fr: "Ce Gladys n'envoie pas les champs de ce bouton : mettez Gladys à jour.",
+  },
+  dataReset: {
+    en: 'The saved data of the integration was unreadable: it was moved to viera.json.bad and the TVs must be found (and paired) again.',
+    fr: "Les données enregistrées de l'intégration étaient illisibles : elles ont été déplacées dans viera.json.bad et les TV doivent être retrouvées (et appairées) de nouveau.",
+  },
   invalidEntries: (entries) => ({
     en: `Ignored in the configuration (invalid): ${list(entries)}.`,
     fr: `Ignoré dans la configuration (invalide) : ${list(entries)}.`,
@@ -49,8 +57,8 @@ export const T = {
     fr: `${name} a refusé de démarrer l'appairage (${detail}). Vérifiez que la commande à distance par le réseau (« TV Remote App ») est autorisée dans les réglages réseau de la TV.`,
   }),
   invalidPinFormat: {
-    en: 'The PIN is the 4-digit code shown on the TV.',
-    fr: 'Le code PIN est le code à 4 chiffres affiché sur la TV.',
+    en: 'The PIN is the code shown on the TV: 4 to 8 digits.',
+    fr: 'Le code PIN est le code affiché sur la TV : 4 à 8 chiffres.',
   },
   noPendingPairing: {
     en: 'No pairing in progress, or it expired: use "Start pairing" first.',
@@ -88,9 +96,18 @@ export const T = {
     const wake = tv.wakeMac
       ? { en: 'Wake-on-LAN ready', fr: 'Wake-on-LAN prêt' }
       : { en: 'no MAC for Wake-on-LAN', fr: 'pas de MAC pour le Wake-on-LAN' };
+    const state =
+      on === true
+        ? {
+            en: `on, volume ${reading.volume}${reading.muted ? ', muted' : ''}`,
+            fr: `allumée, volume ${reading.volume}${reading.muted ? ', sourdine' : ''}`,
+          }
+        : on === false
+          ? { en: 'off or unreachable', fr: 'éteinte ou injoignable' }
+          : { en: 'state unknown (unexpected answer)', fr: 'état inconnu (réponse inattendue)' };
     return {
-      en: `${tv.name} (${tv.host || 'address unknown'}): ${on ? `on, volume ${reading.volume}${reading.muted ? ', muted' : ''}` : 'off or unreachable'}, ${pairing.en}, ${wake.en}`,
-      fr: `${tv.name} (${tv.host || 'adresse inconnue'}) : ${on ? `allumée, volume ${reading.volume}${reading.muted ? ', sourdine' : ''}` : 'éteinte ou injoignable'}, ${pairing.fr}, ${wake.fr}`,
+      en: `${tv.name} (${tv.host || 'address unknown'}): ${state.en}, ${pairing.en}, ${wake.en}`,
+      fr: `${tv.name} (${tv.host || 'adresse inconnue'}) : ${state.fr}, ${pairing.fr}, ${wake.fr}`,
     };
   },
 };

@@ -5,9 +5,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { VieraClient } from '../src/viera/client.js';
-import { ERROR_KINDS } from '../src/viera/http.js';
+import { ERROR_KINDS, MAX_BODY } from '../src/viera/http.js';
 import { PIN, UDN, startFakeTv } from './fixtures/fakeTv.js';
 
 async function setup(t, options) {
@@ -84,26 +85,70 @@ test('a wrong PIN is told apart', async (t) => {
   assert.equal(client.paired, false);
 });
 
-test('a refused encrypted command renews the session once, restoring the sequence', async (t) => {
+test('"No such session" renews the session once, restoring the sequence', async (t) => {
   const { tv, client } = await setup(t, { encrypted: true });
   await client.authorizePin(await client.requestPin(), PIN);
+  assert.equal(tv.sessionCount, 0, 'the session is opened by the caller, after saving');
   await client.sendKey('up');
   tv.refuseCommands = 1;
   await client.sendKey('down');
   assert.deepEqual(tv.keys, ['NRC_UP-ONOFF', 'NRC_DOWN-ONOFF']);
-  assert.equal(tv.sessions.size, 2, 'a second session was opened');
+  assert.equal(tv.sessionCount, 2, 'a second session was opened');
   tv.refuseCommands = 2;
   await assert.rejects(client.sendKey('left'), { kind: ERROR_KINDS.FAULT });
   assert.equal(client.session.sequence, tv.calls.at(-1).sequence - 1, 'sequence restored');
 });
 
-test('keys the TV no longer knows are reported, not retried in a loop', async (t) => {
+test('any other fault is not retried, and the power key is never sent twice', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  await client.authorizePin(await client.requestPin(), PIN);
+  await client.sendKey('up');
+  tv.failCommands = 1;
+  await assert.rejects(client.sendKey('down'), { description: 'Action failed' });
+  assert.equal(tv.sessionCount, 1, 'no renewal on another fault');
+
+  const calls = tv.calls.length;
+  tv.refuseCommands = 1;
+  await assert.rejects(client.sendKey('power'), /No such session/);
+  assert.equal(tv.calls.length, calls + 1, 'power sent once');
+  assert.ok(!tv.keys.includes('NRC_POWER-ONOFF'));
+  await client.sendKey('right');
+  assert.equal(tv.sessionCount, 2, 'the next command opens a new session');
+});
+
+test('keys the TV explicitly refuses are reported, not retried in a loop', async (t) => {
   const { tv, client } = await setup(t, { encrypted: true });
   const credentials = await client.authorizePin(await client.requestPin(), PIN);
   tv.pairings.clear();
   const fresh = new VieraClient({ host: '127.0.0.1', port: tv.port, encrypted: true, credentials });
   await assert.rejects(fresh.sendKey('up'), { kind: ERROR_KINDS.KEYS_REFUSED });
   assert.equal(tv.calls.length, 0);
+});
+
+test('"Action failed" on the session request with valid keys is a passing refusal', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  let sessions = 0;
+  client.onSession = () => {
+    sessions += 1;
+  };
+  await client.authorizePin(await client.requestPin(), PIN);
+  tv.sessionFaults = 1;
+  await assert.rejects(client.sendKey('up'), { kind: ERROR_KINDS.SESSION_REFUSED });
+  await client.sendKey('up');
+  assert.equal(sessions, 1);
+  assert.deepEqual(tv.keys, ['NRC_UP-ONOFF']);
+});
+
+test('a budgeted view shares the session and ends in time', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  await client.authorizePin(await client.requestPin(), PIN);
+  await client.withBudget(2000).sendKey('up');
+  await client.sendKey('down');
+  assert.equal(tv.sessionCount, 1, 'one session for both views');
+  tv.silent = true;
+  const started = Date.now();
+  await assert.rejects(client.withBudget(300).getMute(), { kind: ERROR_KINDS.UNREACHABLE });
+  assert.ok(Date.now() - started < 1000);
 });
 
 test('a TV in standby (connection closed, or nothing listening) is unreachable', async (t) => {
@@ -138,4 +183,16 @@ test('a silent TV times out', async (t) => {
     timeoutMs: 200,
   });
   await assert.rejects(client.getMute(), /timeout/);
+});
+
+test('an answer above 64 KB is refused', async (t) => {
+  const server = createHttpServer((req, res) => {
+    res.writeHead(200);
+    res.end('<a>'.repeat(30_000));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  assert.equal(MAX_BODY, 64 * 1024);
+  const client = new VieraClient({ host: '127.0.0.1', port: server.address().port });
+  await assert.rejects(client.describe(), /too large/);
 });

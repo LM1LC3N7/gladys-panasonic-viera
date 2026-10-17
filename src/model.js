@@ -81,17 +81,29 @@ export function featureKey(deviceExternalId, featureExternalId) {
     : undefined;
 }
 
-/** The states of a TV read by polling: power, and volume and mute when on. */
+/**
+ * The states of a reading: power, and volume and mute when known. An unknown
+ * power state (`on` undefined) publishes nothing.
+ */
 export function stateList(gladys, tv, reading) {
+  if (reading.on !== true && reading.on !== false) {
+    return [];
+  }
   const ids = gladys.externalIds(DEVICE_TYPE, tv.udn);
   const states = [
     { device_feature_external_id: ids.feature(FEATURES.POWER), state: reading.on ? 1 : 0 },
   ];
-  if (reading.on) {
-    states.push(
-      { device_feature_external_id: ids.feature(FEATURES.VOLUME), state: reading.volume },
-      { device_feature_external_id: ids.feature(FEATURES.MUTE), state: reading.muted ? 1 : 0 },
-    );
+  if (reading.on && Number.isInteger(reading.volume)) {
+    states.push({
+      device_feature_external_id: ids.feature(FEATURES.VOLUME),
+      state: reading.volume,
+    });
+  }
+  if (reading.on && typeof reading.muted === 'boolean') {
+    states.push({
+      device_feature_external_id: ids.feature(FEATURES.MUTE),
+      state: reading.muted ? 1 : 0,
+    });
   }
   return states;
 }

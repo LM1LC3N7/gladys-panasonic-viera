@@ -10,6 +10,7 @@ import { LIMITS, POLL_INTERVAL } from './constants.js';
 export const DEFAULT_CONFIG = {
   addresses: '',
   mac_addresses: '',
+  wake_broadcast: '',
   poll_interval: POLL_INTERVAL.default,
 };
 
@@ -83,10 +84,21 @@ export function normalizeConfig(raw = {}) {
       invalid.push(entry.slice(0, 100));
     }
   }
+  // Optional subnet broadcast for the magic packet (e.g. 192.168.1.255).
+  const broadcast = String(c.wake_broadcast ?? '').trim();
+  let wakeAddress;
+  if (broadcast !== '') {
+    if (isIP(broadcast) === 4) {
+      wakeAddress = broadcast;
+    } else {
+      invalid.push(broadcast.slice(0, 100));
+    }
+  }
   const interval = Number(c.poll_interval);
   return {
     addresses,
     macs,
+    wakeAddress,
     invalid,
     pollInterval: Number.isFinite(interval)
       ? Math.min(POLL_INTERVAL.max, Math.max(POLL_INTERVAL.min, Math.round(interval)))

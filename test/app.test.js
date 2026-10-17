@@ -10,7 +10,10 @@ import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { VieraApp } from '../src/app.js';
 import { TIMINGS } from '../src/constants.js';
 import { registerHandlers } from '../src/handlers.js';
-import { MemoryStore } from '../src/store.js';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { FileStore, MemoryStore } from '../src/store.js';
 import { OTHER_UDN, PIN, UDN, startFakeTv } from './fixtures/fakeTv.js';
 
 const SELECTOR = 'panasonic-viera';
@@ -32,6 +35,8 @@ async function setup(
     config = { addresses: '127.0.0.1' },
     store = new MemoryStore(),
     scanResults = {},
+    timings = {},
+    realTimers = false,
   } = {},
 ) {
   const tv = await startFakeTv(tvOptions);
@@ -49,8 +54,15 @@ async function setup(
     logger,
     store,
     port: tv.port,
-    timers,
-    timings: { ...TIMINGS, httpTimeout: 1000, wakeWait: 200, wakeStep: 10, recheckDelay: 1 },
+    timers: realTimers ? { ...timers, setTimeout: globalThis.setTimeout } : timers,
+    timings: {
+      ...TIMINGS,
+      httpTimeout: 1000,
+      wakeWait: 200,
+      wakeStep: 10,
+      recheckDelay: 1,
+      ...timings,
+    },
   });
   registerHandlers(gladys, app, logger);
   await gladys.connect();
@@ -177,19 +189,110 @@ test('power on from deep standby: Wake-on-LAN, and never a power key after it', 
     }
     return wake(mac, options);
   };
+  // Acked as soon as the packet is out; the TV is waited for in the background.
   assert.equal((await set(gladys, device, 'power', 1)).success, true);
   assert.deepEqual(gladys.fake.bodies('POST', '/network/wake'), [{ mac: MAC }]);
+  await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(gladys.fake.lastState(id(UDN, 'power')), 1);
   assert.deepEqual(tv.keys, []);
+});
 
-  // The TV does not wake up: the command fails, still without a power key.
+test('a TV that does not wake up: the packet again, never a power key', async (t) => {
+  const { tv, gladys, logs } = await setup(t, {
+    config: {
+      addresses: '127.0.0.1',
+      mac_addresses: `127.0.0.1=${MAC}`,
+      wake_broadcast: '192.168.1.255',
+    },
+  });
+  const device = await createTv(gladys);
   tv.reachable = false;
+  assert.equal((await set(gladys, device, 'power', 1)).success, true);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const wakes = gladys.fake.bodies('POST', '/network/wake');
+  assert.ok(wakes.length >= 2, `${wakes.length} packets`);
+  assert.deepEqual(wakes[0], { mac: MAC, address: '192.168.1.255' });
+  assert.deepEqual(tv.keys, []);
+  assert.ok(logs.some((line) => /did not answer after Wake-on-LAN/.test(line)));
+});
+
+test('with a MAC, a TV in network standby gets the power key, then the packet', async (t) => {
+  const { tv, gladys } = await setup(t, {
+    config: { addresses: '127.0.0.1', mac_addresses: `127.0.0.1=${MAC}` },
+  });
+  const device = await createTv(gladys);
+  tv.on = false;
   tv.dmrReachable = false;
-  await set(gladys, device, 'power', 0);
+  assert.equal((await set(gladys, device, 'power', 1)).success, true);
+  assert.deepEqual(tv.keys, ['NRC_POWER-ONOFF']);
+  assert.equal(gladys.fake.bodies('POST', '/network/wake').length, 1);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(gladys.fake.lastState(id(UDN, 'power')), 1);
+  assert.deepEqual(tv.keys, ['NRC_POWER-ONOFF'], 'one key only');
+});
+
+test('an unknown state is never published and never decides a toggle', async (t) => {
+  const { tv, gladys, app } = await setup(t, {
+    config: { addresses: '127.0.0.1', mac_addresses: `127.0.0.1=${MAC}` },
+  });
+  const device = await createTv(gladys);
+  const published = gladys.fake.states.length;
+  tv.dmrFault = true;
+  await app.poll();
+  assert.equal(gladys.fake.states.length, published, 'nothing published');
+  for (const value of [0, 1]) {
+    await set(gladys, device, 'power', value);
+  }
+  assert.deepEqual(tv.keys, [], 'no toggle on an unknown state');
+  assert.equal(
+    gladys.fake.bodies('POST', '/network/wake').length,
+    1,
+    'with a MAC, "on" still sends Wake-on-LAN',
+  );
+  // The way out: the raw key.
+  assert.equal((await set(gladys, device, 'key', 'power')).success, true);
+  assert.deepEqual(tv.keys, ['NRC_POWER-ONOFF']);
+});
+
+test('stop() cancels the background Wake-on-LAN wait', async (t) => {
+  const { tv, gladys, app } = await setup(t, {
+    config: { addresses: '127.0.0.1', mac_addresses: `127.0.0.1=${MAC}` },
+    timings: { wakeWait: 5_000 },
+  });
+  const device = await createTv(gladys);
+  tv.reachable = false;
+  await set(gladys, device, 'power', 1);
+  await app.stop();
+  const sent = gladys.fake.bodies('POST', '/network/wake').length;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(gladys.fake.bodies('POST', '/network/wake').length, sent);
+});
+
+test('power on from deep standby without a MAC says what is missing', async (t) => {
+  const { tv, gladys } = await setup(t);
+  const device = await createTv(gladys);
+  tv.reachable = false;
   const ack = await set(gladys, device, 'power', 1);
   assert.equal(ack.success, false);
-  assert.match(ack.error, /did not answer/);
-  assert.deepEqual(tv.keys, []);
+  assert.match(ack.error, /Wake-on-LAN/);
+});
+
+test('a silent TV: the command is acked within 4.5 s', async (t) => {
+  const { tv, gladys } = await setup(t, {
+    timings: { httpTimeout: TIMINGS.httpTimeout },
+  });
+  const device = await createTv(gladys);
+  tv.silent = true;
+  for (const [key, value] of [
+    ['power', 1],
+    ['volume', 20],
+    ['key', 'up'],
+  ]) {
+    const started = Date.now();
+    await set(gladys, device, key, value);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 4500, `${key}: ${elapsed} ms`);
+  }
 });
 
 test('power on from deep standby without a MAC says what is missing', async (t) => {
@@ -213,7 +316,11 @@ test('PIN pairing of an encrypted model, from the configuration screen', async (
   const finishEarly = await gladys.fake.action('finish_pairing', { pin: PIN });
   assert.match(finishEarly.data.message.en, /No pairing in progress/);
   const badFormat = await gladys.fake.action('finish_pairing', { pin: '12a4' });
-  assert.match(badFormat.data.message.en, /4-digit/);
+  assert.match(badFormat.data.message.en, /4 to 8 digits/);
+  for (const key of ['start_pairing', 'finish_pairing']) {
+    const old = await gladys.fake.action(key);
+    assert.match(old.data.message.fr, /mettez Gladys à jour/, `${key} without fields`);
+  }
   const badAddress = await gladys.fake.action('start_pairing', { address: 'not an ip!' });
   assert.match(badAddress.data.message.en, /IP address/);
 
@@ -266,12 +373,73 @@ test('keys the TV refuses: reported once, the TV not asked again until a new pai
   assert.equal((await set(gladys, device, 'key', 'up')).success, false);
   assert.equal(app.tvs[0].keysRefused, true);
   assert.equal(gladys.fake.connectionStatus.connected, false);
-  const requests = tv.calls.length;
+  const requests = tv.requests.length;
   assert.equal((await set(gladys, device, 'key', 'up')).success, false);
-  assert.equal(tv.calls.length, requests);
+  assert.equal(tv.requests.length, requests, 'not asked again before the slow retry');
   assert.equal(tv.sessions.size, 0);
   // Volume still works.
   assert.equal((await set(gladys, device, 'volume', 3)).success, true);
+
+  // The slow retry: once due, the keys are tried again; a session clears the mark.
+  tv.pairings.set('APPGONE', Buffer.alloc(16, 7).toString('base64'));
+  app.keysRetryAt.set(UDN, 0);
+  assert.equal((await set(gladys, device, 'key', 'up')).success, true);
+  assert.equal(app.tvs[0].keysRefused, false);
+  assert.equal(gladys.fake.connectionStatus.connected, true);
+});
+
+test('"Action failed" on the session request with valid keys is a passing error', async (t) => {
+  const keyword = Buffer.alloc(16, 9).toString('base64');
+  const store = new MemoryStore({
+    tvs: {
+      [UDN]: {
+        udn: UDN,
+        host: '127.0.0.1',
+        name: 'Living room TV',
+        encrypted: true,
+        appId: 'APPOK',
+        encKey: keyword,
+      },
+    },
+  });
+  const { tv, gladys, app } = await setup(t, {
+    tvOptions: { encrypted: true },
+    store,
+    timings: { refusalSpacing: 0 },
+  });
+  tv.pairings.set('APPOK', keyword);
+  const device = await createTv(gladys);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const expire = () => {
+    app.clients.get(UDN).shared.session = undefined;
+  };
+
+  expire();
+  tv.sessionFaults = 1;
+  assert.equal((await set(gladys, device, 'key', 'up')).success, false);
+  assert.equal(app.tvs[0].keysRefused ?? false, false, 'one refusal is not a proof');
+  assert.equal((await set(gladys, device, 'key', 'up')).success, true);
+
+  // Three refusals while the TV is on: then the keys are marked refused.
+  for (let i = 0; i < 3; i += 1) {
+    expire();
+    tv.sessionFaults = 1;
+    await set(gladys, device, 'key', 'down');
+  }
+  assert.equal(app.tvs[0].keysRefused, true);
+  assert.equal(gladys.fake.connectionStatus.connected, false);
+});
+
+test('an unreadable /data file is moved aside and reported', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'viera-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await writeFile(join(dir, 'viera.json'), '{ not json');
+  const store = new FileStore({ dir });
+  const { gladys } = await setup(t, { store });
+  assert.equal(store.corrupted, true);
+  assert.equal((await readFile(join(dir, 'viera.json.bad'), 'utf8')).trim(), '{ not json');
+  assert.match(gladys.fake.connectionStatus.message.en, /viera\.json\.bad/);
+  assert.equal(gladys.fake.discoveredDevices.length, 1, 'the typed address is found again');
 });
 
 test('SSDP search through Gladys: the address that answered, its MAC for Wake-on-LAN', async (t) => {

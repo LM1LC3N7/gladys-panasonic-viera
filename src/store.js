@@ -5,7 +5,7 @@
 // encrypted models (application id and key). Never logged.
 // -----------------------------------------------------------------------------
 
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const emptyData = () => ({ tvs: {} });
@@ -26,12 +26,28 @@ export class FileStore {
   constructor({ dir = process.env.DATA_DIR || '/data', name = 'viera.json' } = {}) {
     this.dir = dir;
     this.path = join(dir, name);
+    this.corrupted = false;
   }
 
+  /**
+   * The saved data. An unreadable file is moved aside to `viera.json.bad`
+   * (0600, it may hold pairing keys) and `corrupted` is set, so the app says
+   * so instead of silently starting over.
+   */
   async load() {
+    let text;
     try {
-      return sanitize(JSON.parse(await readFile(this.path, 'utf8')));
+      text = await readFile(this.path, 'utf8');
     } catch {
+      return emptyData();
+    }
+    try {
+      return sanitize(JSON.parse(text));
+    } catch {
+      this.corrupted = true;
+      const bad = `${this.path}.bad`;
+      await rename(this.path, bad).catch(() => {});
+      await chmod(bad, 0o600).catch(() => {});
       return emptyData();
     }
   }
@@ -49,6 +65,7 @@ export class MemoryStore {
   constructor(data = emptyData()) {
     this.data = structuredClone(data);
     this.saves = 0;
+    this.corrupted = false;
   }
 
   async load() {
