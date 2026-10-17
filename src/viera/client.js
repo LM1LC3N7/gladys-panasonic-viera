@@ -313,14 +313,17 @@ export class VieraClient {
         'u',
       );
     } catch (err) {
-      session.sequence -= 1;
-      if (
-        (err.kind === ERROR_KINDS.FAULT || err.kind === ERROR_KINDS.HTTP) &&
-        this.shared.session === session
-      ) {
-        // Whatever the TV disliked, the next command starts a new session.
-        this.shared.session = undefined;
+      if (err.kind === ERROR_KINDS.FAULT || err.kind === ERROR_KINDS.HTTP) {
+        // An explicit HTTP error: the TV did not take the number (restored as
+        // the library does on HTTPError), and whatever it disliked, the next
+        // command starts a new session.
+        session.sequence -= 1;
+        if (this.shared.session === session) {
+          this.shared.session = undefined;
+        }
       }
+      // A timeout or a lost connection: the TV may have used the number, it
+      // is not given back (the library does not either).
       throw err;
     }
     return this.decrypted(body, 'X_EncResult', undefined, keys);

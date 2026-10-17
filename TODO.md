@@ -40,7 +40,12 @@ up to date at the end of every milestone.
     the input menu key);
   - Wake-on-LAN: which models wake from deep standby, and whether the TV
     switches the screen on (or only the network) after the packet;
-  - the MAC in the SSDP answer relayed by Gladys (`source_mac`).
+  - the MAC in the SSDP answer relayed by Gladys (`source_mac`);
+  - a deadline that falls while a command is already running (its requests
+    end within the budget, but the last one may still be in flight): Gladys
+    then receives a failure although the action may succeed on the TV. Check
+    how often it happens on a slow TV, and whether the margin (100 ms) or the
+    budget (4.2 s) needs tuning.
 - [ ] **Milestone 3 — more**: the current input and application read back
       (PAC `QMI` on the models that publish it), the UPnP events (state pushed
       instead of polled), "forget a TV" action, picture mode (PAC).

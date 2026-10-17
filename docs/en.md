@@ -68,8 +68,10 @@ they do not show the state.
 The power key toggles: the integration reads the state from the TV just
 before acting (1.5 s at most) and sends nothing when the TV already is in the
 wanted state. "On" means "the TV answers volume requests"; "off" means
-"nothing answers". When the TV answers something unexpected, the state is
-**unknown**: nothing is published and no power key is sent.
+"nothing answers": the connection is refused or never accepted. When the TV
+answers something unexpected, or accepts the connection and then says
+nothing, the state is **unknown**: nothing is published (Gladys keeps showing
+the last known state) and no power key is sent.
 
 - TV in **network standby** ("Powered On by Apps" enabled): the power key is
   enough.

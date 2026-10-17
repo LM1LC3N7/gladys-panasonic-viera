@@ -74,9 +74,11 @@ commander, pas à afficher l'état.
 La touche marche/arrêt inverse l'état : l'intégration lit donc l'état de la
 TV juste avant d'agir (1,5 seconde au plus) et n'envoie rien si la TV est déjà
 dans l'état voulu. « Allumée » veut dire « la TV répond aux demandes de
-volume » ; « éteinte », « rien ne répond ». Quand la TV répond quelque chose
-d'inattendu, l'état est **inconnu** : rien n'est publié et aucune touche
-marche/arrêt n'est envoyée.
+volume » ; « éteinte », « rien ne répond » : la connexion est refusée ou
+jamais acceptée. Quand la TV répond quelque chose d'inattendu, ou accepte la
+connexion puis ne dit plus rien, l'état est **inconnu** : rien n'est publié
+(Gladys garde affiché le dernier état connu) et aucune touche marche/arrêt
+n'est envoyée.
 
 - TV en **veille réseau** (« Allumage par les applications » activé) : la
   touche marche/arrêt suffit.

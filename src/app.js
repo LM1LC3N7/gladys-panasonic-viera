@@ -27,6 +27,10 @@ const BUTTON_BY_FEATURE = new Map(BUTTONS.map((button) => [button.feature, butto
 // Features served by DMR (never encrypted): they work without pairing keys.
 const DMR_FEATURES = new Set([FEATURES.VOLUME, FEATURES.MUTE, FEATURES.POWER]);
 
+/** For the pairing messages: the TV did not answer (nothing connected, or silent). */
+const isNoAnswer = (err) =>
+  err?.kind === ERROR_KINDS.UNREACHABLE || err?.kind === ERROR_KINDS.TIMEOUT;
+
 /** Runs `task` over `items`, `limit` at a time, results in order. */
 async function mapLimit(items, limit, task) {
   const results = new Array(items.length);
@@ -805,7 +809,7 @@ export class VieraApp {
     try {
       tv = await this.identify(host);
     } catch (err) {
-      return err.kind === ERROR_KINDS.UNREACHABLE ? T.unreachable(host) : T.notPanasonic(host);
+      return isNoAnswer(err) ? T.unreachable(host) : T.notPanasonic(host);
     }
     if (!tv) {
       return T.notPanasonic(host);
@@ -821,7 +825,7 @@ export class VieraApp {
         this.logger.info(`Pairing started with ${tv.name}: PIN displayed on the TV`);
         return T.pinDisplayed(tv.name, Math.round(this.timings.pairingTtl / 60_000));
       } catch (err) {
-        if (err.kind === ERROR_KINDS.UNREACHABLE) {
+        if (isNoAnswer(err)) {
           return T.unreachable(host);
         }
         return T.pairingRefused(tv.name, err.description || err.message);
@@ -848,7 +852,7 @@ export class VieraApp {
       try {
         credentials = await this.client(tv).authorizePin(pending.challenge, pin);
       } catch (err) {
-        if (err.kind === ERROR_KINDS.UNREACHABLE) {
+        if (isNoAnswer(err)) {
           // The PIN may still be valid: the user can try again once the TV answers.
           return T.unreachable(tv.host);
         }

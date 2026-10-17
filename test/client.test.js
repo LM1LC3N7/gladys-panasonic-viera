@@ -151,6 +151,12 @@ test('a timeout after the connection was accepted is ambiguous: never resent', a
   const requests = tv.requests.length;
   await assert.rejects(client.withBudget(300).sendKey('power'), { kind: ERROR_KINDS.TIMEOUT });
   assert.equal(tv.requests.length, requests + 1, 'sent once');
+  // The number the TV may have used is not given back (as the library does).
+  assert.equal(client.session.sequence, 3, 'kept after a timeout');
+  tv.silent = false;
+  await client.sendKey('down');
+  assert.equal(tv.calls.at(-1).sequence, 4);
+  assert.equal(tv.sessionCount, 1, 'same session');
 });
 
 test('keys the TV explicitly refuses are reported, not retried in a loop', async (t) => {
