@@ -10,6 +10,10 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Changed
+
+- LICENSE: standard Apache-2.0 appendix line, without a personal name.
+
 ## [0.1.1] - 2026-10-17
 
 ### Added
