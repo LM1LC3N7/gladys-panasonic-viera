@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
 ### Added
 
 - Panasonic Viera TVs over their local UPnP/SOAP remote control (port 55000),
@@ -32,4 +34,5 @@ the notes of the version's GitHub Release.
   no power key after it.
 - "Check the TVs" button: state, pairing and Wake-on-LAN of each TV.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-panasonic-viera/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-panasonic-viera/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-panasonic-viera/releases/tag/v0.1.1

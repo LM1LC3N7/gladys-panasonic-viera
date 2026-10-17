@@ -1,6 +1,6 @@
 {
   "name": "gladys-panasonic-viera",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for Panasonic Viera TVs (power, volume, mute, remote keys, source, apps), over their local UPnP/SOAP remote control. Unofficial, not affiliated with Panasonic.",
   "type": "module",
