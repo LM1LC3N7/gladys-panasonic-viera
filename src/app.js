@@ -464,8 +464,9 @@ export class VieraApp {
       if (err.kind === ERROR_KINDS.UNREACHABLE) {
         return { on: false };
       }
-      if (err.kind === ERROR_KINDS.BUDGET) {
-        // No time left to ask: not a sign that the TV is off.
+      if (err.kind === ERROR_KINDS.BUDGET || err.kind === ERROR_KINDS.TIMEOUT) {
+        // No time left to ask, or a TV that accepted the connection and said
+        // nothing: not a sign that it is off.
         return { on: undefined };
       }
       this.warnOnce(`read:${tv.udn}`, `${tv.name}: unexpected answer (${err.message})`);
@@ -568,7 +569,14 @@ export class VieraApp {
     const key = featureKey(device.external_id, feature?.external_id);
     // The budget runs from the request of Gladys, the wait in the queue included.
     const started = this.now();
-    return this.enqueue(tv.udn, async () => {
+    let late = false;
+    const run = this.enqueue(tv.udn, async () => {
+      if (late || this.remaining(started) < 50) {
+        // Gladys stopped waiting while this command was queued (behind a
+        // pairing...): it is dropped, never sent late.
+        late = true;
+        throw new TvError(ERROR_KINDS.BUDGET, 'No time left for this command');
+      }
       try {
         await this.command(tv, key, value, started);
       } catch (err) {
@@ -576,6 +584,23 @@ export class VieraApp {
         throw err;
       }
     });
+    // Wall-clock deadline (not the injectable timers): the ack Gladys waits for.
+    let timer;
+    const deadline = new Promise((resolve, reject) => {
+      timer = setTimeout(
+        () => {
+          late = true;
+          reject(new TvError(ERROR_KINDS.BUDGET, 'No time left for this command (TV busy)'));
+        },
+        Math.max(0, this.remaining(started)) + 100,
+      );
+    });
+    run.catch(() => {});
+    try {
+      return await Promise.race([run, deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** What is left of the budget of a command started at `started`. */

@@ -96,24 +96,61 @@ test('"No such session" renews the session once, restoring the sequence', async 
   assert.equal(tv.sessionCount, 2, 'a second session was opened');
   tv.refuseCommands = 2;
   await assert.rejects(client.sendKey('left'), { kind: ERROR_KINDS.FAULT });
-  assert.equal(client.session.sequence, tv.calls.at(-1).sequence - 1, 'sequence restored');
+  assert.equal(tv.calls.at(-1).sequence, 2, 'the renewed session started over');
+  assert.equal(client.session, undefined, 'dropped: the next command opens a new one');
+  assert.ok(!tv.keys.includes('NRC_LEFT-ONOFF'));
 });
 
-test('any other fault is not retried, and the power key is never sent twice', async (t) => {
+test('"No such session" in the HTTP reason phrase only (no fault body) renews too', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  await client.authorizePin(await client.requestPin(), PIN);
+  await client.sendKey('up');
+  tv.expiry = 'phrase';
+  tv.refuseCommands = 1;
+  await client.sendKey('down');
+  assert.deepEqual(tv.keys, ['NRC_UP-ONOFF', 'NRC_DOWN-ONOFF']);
+  assert.equal(tv.sessionCount, 2);
+});
+
+test('after an explicit expiry the power key is sent again: the TV did not run it', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  await client.authorizePin(await client.requestPin(), PIN);
+  await client.sendKey('up');
+  tv.refuseCommands = 1;
+  await client.sendKey('power');
+  assert.deepEqual(tv.keys, ['NRC_UP-ONOFF', 'NRC_POWER-ONOFF'], 'run once by the TV');
+  assert.equal(tv.sessionCount, 2);
+});
+
+test('any other fault (e.g. 401 Invalid Action) is not resent, the next command opens a new session', async (t) => {
   const { tv, client } = await setup(t, { encrypted: true });
   await client.authorizePin(await client.requestPin(), PIN);
   await client.sendKey('up');
   tv.failCommands = 1;
-  await assert.rejects(client.sendKey('down'), { description: 'Action failed' });
-  assert.equal(tv.sessionCount, 1, 'no renewal on another fault');
-
+  tv.failWith = [401, 'Invalid Action'];
   const calls = tv.calls.length;
-  tv.refuseCommands = 1;
-  await assert.rejects(client.sendKey('power'), /No such session/);
+  await assert.rejects(client.sendKey('power'), { description: 'Invalid Action' });
   assert.equal(tv.calls.length, calls + 1, 'power sent once');
-  assert.ok(!tv.keys.includes('NRC_POWER-ONOFF'));
+  assert.equal(client.session, undefined, 'session dropped');
   await client.sendKey('right');
   assert.equal(tv.sessionCount, 2, 'the next command opens a new session');
+  assert.deepEqual(tv.keys, ['NRC_UP-ONOFF', 'NRC_RIGHT-ONOFF']);
+
+  tv.failCommands = 1;
+  tv.failWith = [501, 'Action failed'];
+  await assert.rejects(client.sendKey('down'), { description: 'Action failed' });
+  await client.sendKey('left');
+  assert.equal(tv.sessionCount, 3);
+});
+
+test('a timeout after the connection was accepted is ambiguous: never resent', async (t) => {
+  const { tv, client } = await setup(t, { encrypted: true });
+  await client.authorizePin(await client.requestPin(), PIN);
+  await client.sendKey('up');
+  tv.silent = true;
+  const requests = tv.requests.length;
+  await assert.rejects(client.withBudget(300).sendKey('power'), { kind: ERROR_KINDS.TIMEOUT });
+  assert.equal(tv.requests.length, requests + 1, 'sent once');
 });
 
 test('keys the TV explicitly refuses are reported, not retried in a loop', async (t) => {
@@ -147,7 +184,8 @@ test('a budgeted view shares the session and ends in time', async (t) => {
   assert.equal(tv.sessionCount, 1, 'one session for both views');
   tv.silent = true;
   const started = Date.now();
-  await assert.rejects(client.withBudget(300).getMute(), { kind: ERROR_KINDS.UNREACHABLE });
+  // The connection is accepted, then nothing: unknown, not "off".
+  await assert.rejects(client.withBudget(300).getMute(), { kind: ERROR_KINDS.TIMEOUT });
   assert.ok(Date.now() - started < 1000);
 });
 

@@ -42,6 +42,16 @@ const CLEAR_ACTIONS = new Set(['X_GetEncryptSessionId', 'X_DisplayPinCode', 'X_R
 // treated as a passing failure, counted by the app).
 const EXPLICIT_REFUSAL = /unauthori[sz]ed|forbidden|not\s+(?:paired|registered)|authenticat/i;
 const MIN_REQUEST_MS = 50;
+const NO_SUCH_SESSION = /no\s+such\s+session/i;
+
+/** The TV explicitly says the session is gone (so it did not run the command). */
+export function isSessionExpired(err) {
+  return (
+    (err?.kind === ERROR_KINDS.FAULT || err?.kind === ERROR_KINDS.HTTP) &&
+    err.status === 500 &&
+    (NO_SUCH_SESSION.test(err.statusMessage ?? '') || NO_SUCH_SESSION.test(err.description ?? ''))
+  );
+}
 
 export class VieraClient {
   /**
@@ -169,15 +179,19 @@ export class VieraClient {
     if (res.status >= 200 && res.status < 300) {
       return res.body;
     }
+    const statusMessage = res.statusMessage ?? '';
     const fault = parseFault(res.body);
     if (fault) {
       throw new TvError(
         ERROR_KINDS.FAULT,
         `${action} refused: ${fault.code ?? '?'} ${fault.description ?? ''}`.trim(),
-        { status: res.status, code: fault.code, description: fault.description },
+        { status: res.status, statusMessage, code: fault.code, description: fault.description },
       );
     }
-    throw new TvError(ERROR_KINDS.HTTP, `${action}: HTTP ${res.status}`, { status: res.status });
+    throw new TvError(ERROR_KINDS.HTTP, `${action}: HTTP ${res.status} ${statusMessage}`.trim(), {
+      status: res.status,
+      statusMessage,
+    });
   }
 
   // --- Encrypted session ------------------------------------------------------
@@ -251,11 +265,16 @@ export class VieraClient {
 
   /**
    * One NRC command: in clear on the older models, wrapped in the session on
-   * the encrypted ones. The session is renewed once, and only when the TV
-   * says it no longer knows it (HTTP 500 "No such session"); a non-repeatable
-   * command (the power toggle) is never sent twice.
+   * the encrypted ones.
+   *
+   * Any HTTP error or SOAP fault of the encrypted command drops the session,
+   * so the next command opens a new one. The command is sent again (once, the
+   * power toggle included) only when the TV explicitly says the session is
+   * gone: HTTP 500 with "No such session" in the reason phrase or the fault.
+   * It then did not run it. A timeout or any other error is ambiguous (the TV
+   * may have run it): never sent again.
    */
-  async nrc(action, params = '', { repeatable = true } = {}) {
+  async nrc(action, params = '') {
     if (!this.encrypted || CLEAR_ACTIONS.has(action)) {
       return this.soap(URL_NRC, URN_REMOTE_CONTROL, action, params, 'm');
     }
@@ -265,17 +284,9 @@ export class VieraClient {
     try {
       return await this.encryptedCommand(action, params);
     } catch (err) {
-      const expired =
-        err.kind === ERROR_KINDS.FAULT &&
-        err.status === 500 &&
-        /no\s+such\s+session/i.test(err.description ?? '');
-      if (!expired || !repeatable) {
-        if (expired) {
-          this.shared.session = undefined;
-        }
+      if (!isSessionExpired(err)) {
         throw err;
       }
-      this.shared.session = undefined;
       return this.encryptedCommand(action, params);
     }
   }
@@ -303,6 +314,13 @@ export class VieraClient {
       );
     } catch (err) {
       session.sequence -= 1;
+      if (
+        (err.kind === ERROR_KINDS.FAULT || err.kind === ERROR_KINDS.HTTP) &&
+        this.shared.session === session
+      ) {
+        // Whatever the TV disliked, the next command starts a new session.
+        this.shared.session = undefined;
+      }
       throw err;
     }
     return this.decrypted(body, 'X_EncResult', undefined, keys);
@@ -368,9 +386,7 @@ export class VieraClient {
     if (!code) {
       throw new TvError(ERROR_KINDS.PROTOCOL, `Unknown key "${String(name).slice(0, 32)}"`);
     }
-    await this.nrc('X_SendKey', `<X_KeyEvent>${code}</X_KeyEvent>`, {
-      repeatable: name !== 'power',
-    });
+    await this.nrc('X_SendKey', `<X_KeyEvent>${code}</X_KeyEvent>`);
   }
 
   async launchApp(id) {

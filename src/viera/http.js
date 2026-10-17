@@ -22,6 +22,8 @@ export const ERROR_KINDS = Object.freeze({
   SESSION_REFUSED: 'session_refused',
   /** The time a command was given ran out before this request. */
   BUDGET: 'budget',
+  /** The TV accepted the connection, then did not answer in time (state unknown). */
+  TIMEOUT: 'timeout',
   INVALID_PIN: 'invalid_pin',
 });
 
@@ -37,7 +39,7 @@ export class TvError extends Error {
 /**
  * @param {{ host: string, port: number, method?: string, path: string,
  *   headers?: Record<string, string>, body?: string, timeoutMs?: number }} options
- * @returns {Promise<{ status: number, body: string }>}
+ * @returns {Promise<{ status: number, statusMessage: string, body: string }>}
  */
 export function request({
   host,
@@ -86,6 +88,9 @@ export function request({
         res.on('end', () =>
           finish(resolve, {
             status: res.statusCode ?? 0,
+            // The reason phrase carries the TV's word on some errors
+            // ("No such session"), even with no SOAP fault in the body.
+            statusMessage: String(res.statusMessage ?? '').slice(0, 200),
             body: Buffer.concat(chunks).toString('utf8'),
           }),
         );
@@ -97,10 +102,28 @@ export function request({
         );
       },
     );
+    // A TV that accepted the connection and then says nothing is there, in
+    // some state: that is not "off" (refused connection, no route, nothing
+    // answering the connection).
+    let connected = false;
+    req.on('socket', (socket) => {
+      if (socket.connecting) {
+        socket.once('connect', () => {
+          connected = true;
+        });
+      } else {
+        connected = true;
+      }
+    });
     // A plain (ref'd) timer: the exchange keeps the process alive until it ends.
     const timer = setTimeout(() => {
       req.destroy();
-      finish(reject, new TvError(ERROR_KINDS.UNREACHABLE, 'TV unreachable: timeout'));
+      finish(
+        reject,
+        connected
+          ? new TvError(ERROR_KINDS.TIMEOUT, 'TV connected but silent: timeout')
+          : new TvError(ERROR_KINDS.UNREACHABLE, 'TV unreachable: timeout'),
+      );
     }, timeoutMs);
     req.on('error', (err) =>
       finish(

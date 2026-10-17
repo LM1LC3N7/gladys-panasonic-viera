@@ -65,8 +65,9 @@ up to date at the end of every milestone.
   are frozen: `power`, `volume`, `mute`, `source`, `app`, `key`, and the
   buttons of `BUTTONS` in `src/constants.js`.
 - Power: "on" means "DMR answers `GetMute`", "off" means "nothing answers"
-  (connection refused, reset or timeout); an HTTP error, a SOAP fault or an
-  unreadable answer is **unknown**: nothing published, no toggle sent. The
+  (connection refused or reset, no route, connection never accepted); a
+  connection accepted then silent (timeout), an HTTP error, a SOAP fault or
+  an unreadable answer is **unknown**: nothing published, no toggle sent. The
   power key is a toggle, so the state is read from the TV just before acting
   (1.5 s at most) and nothing is sent when it already matches; commands are
   serialized per TV.
@@ -74,7 +75,9 @@ up to date at the end of every milestone.
   from the request of Gladys (the wait in the per-TV queue included), shared
   by all its requests (`VieraClient.withBudget`); a request with no time left
   is "budget", read as an unknown state, never as "off". Background work in
-  the queue (application list, slow key retry) gets 1.5 s.
+  the queue (application list, slow key retry) gets 1.5 s. A command still
+  queued at its deadline (behind a pairing...) is rejected then, and dropped
+  when its turn comes: never sent late.
 - Turning on with a MAC: Wake-on-LAN always (unknown state included); if the
   state is off but port 55000 answers (network standby), the power key first,
   then the packet. The command is acked right after the packet; the TV is
@@ -108,9 +111,13 @@ up to date at the end of every milestone.
   mark. Marked keys are tried again every 30 minutes (on a command or while
   polling a TV that is on), never in a loop. The application list is only
   asked of a TV surely on, and asked again after 10 minutes when it failed.
-- Encrypted session: renewed once, only on HTTP 500 "No such session"; the
-  power key is never sent twice; the sequence number is restored on failure
-  as the library does. `X_GetAppList` is sent with `None` as its argument,
+- Encrypted session: any HTTP error or SOAP fault of `X_EncryptedCommand`
+  drops the session (the next command opens a new one). The command is sent
+  again, once, the power key included, only on an explicit expiry: HTTP 500
+  with "No such session" in the reason phrase (passed up from `http.js`) or
+  in the fault (the TV did not run it). Never on an ambiguous error (timeout,
+  other fault). The sequence number is restored on failure as the library
+  does. `X_GetAppList` is sent with `None` as its argument,
   like the library.
 - An unreadable `/data/viera.json` is renamed `viera.json.bad` (0600) and
   reported in the status; the TVs are found again from the addresses and the

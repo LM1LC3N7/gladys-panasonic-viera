@@ -295,13 +295,21 @@ test('a silent TV: the command is acked within 4.5 s', async (t) => {
   }
 });
 
-test('power on from deep standby without a MAC says what is missing', async (t) => {
-  const { tv, gladys } = await setup(t);
+test('a command waiting behind a long task is rejected at its deadline, never sent late', async (t) => {
+  const { tv, gladys, app } = await setup(t, { timings: { commandBudget: 300 } });
   const device = await createTv(gladys);
-  tv.reachable = false;
-  const ack = await set(gladys, device, 'power', 1);
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const keys = tv.keys.length;
+  // A pairing (or any long task) holds the queue of this TV for 800 ms.
+  app.enqueue(UDN, () => new Promise((resolve) => setTimeout(resolve, 800)));
+  const started = Date.now();
+  const ack = await set(gladys, device, 'key', 'up');
+  const elapsed = Date.now() - started;
   assert.equal(ack.success, false);
-  assert.match(ack.error, /Wake-on-LAN/);
+  assert.match(ack.error, /No time left/);
+  assert.ok(elapsed < 700, `${elapsed} ms`);
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  assert.equal(tv.keys.length, keys, 'not sent once the queue is free');
 });
 
 test('PIN pairing of an encrypted model, from the configuration screen', async (t) => {

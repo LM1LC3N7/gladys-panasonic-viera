@@ -99,8 +99,15 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
     lastSequence: 0,
     /** Number of encrypted commands to refuse (an expired session). */
     refuseCommands: 0,
+    /**
+     * How the expiry is said: 'fault' (UPnP fault "No such session") or
+     * 'phrase' (HTTP 500 reason phrase "No such session", no fault in the body).
+     */
+    expiry: 'fault',
     /** Fault answered to that many encrypted commands (not a session problem). */
     failCommands: 0,
+    /** The fault of `failCommands`. */
+    failWith: [501, 'Action failed'],
     /** Number of session requests refused with "Action failed" (valid keys). */
     sessionFaults: 0,
     /** DMR answers a SOAP fault (state unknown). */
@@ -215,11 +222,13 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
       if (tv.refuseCommands > 0) {
         tv.refuseCommands -= 1;
         tv.sessions.delete(sessionId);
-        return [500, fault(403, 'No such session')];
+        return tv.expiry === 'phrase'
+          ? [500, '', 'No such session']
+          : [500, fault(403, 'No such session')];
       }
       if (tv.failCommands > 0) {
         tv.failCommands -= 1;
-        return [500, fault(501, 'Action failed')];
+        return [500, fault(...tv.failWith)];
       }
       if (tv.sessions.get(sessionId) !== appId || !(sequence > tv.lastSequence)) {
         return [500, fault(403, 'Bad session')];
@@ -285,17 +294,18 @@ export async function startFakeTv({ encrypted = false, udn = UDN, name, model } 
       }
       let status = 200;
       let text = '';
+      let phrase;
       if (req.method === 'GET' && req.url === '/nrc/ddd.xml') {
         text = description({ udn: tv.udn, name: tv.name, model: tv.model });
       } else if (req.method === 'GET' && req.url === '/nrc/sdd_0.xml') {
         text = serviceList(tv.encrypted);
       } else if (req.method === 'POST' && (req.url === '/nrc/control_0' || isDmr)) {
         const action = /#(\w+)"?$/.exec(req.headers.soapaction ?? '')?.[1];
-        [status, text] = isDmr ? dmr(action, body) : nrc(action, body);
+        [status, text, phrase] = isDmr ? dmr(action, body) : nrc(action, body);
       } else {
         status = 404;
       }
-      res.writeHead(status, { 'Content-Type': 'text/xml; charset="utf-8"' });
+      res.writeHead(status, phrase, { 'Content-Type': 'text/xml; charset="utf-8"' });
       res.end(text);
     });
   });
