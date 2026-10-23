@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-10-23
+
 ## [0.1.2] - 2026-10-17
 
 ### Changed
@@ -40,6 +42,7 @@ the notes of the version's GitHub Release.
   no power key after it.
 - "Check the TVs" button: state, pairing and Wake-on-LAN of each TV.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-panasonic-viera/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-panasonic-viera/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/LM1LC3N7/gladys-panasonic-viera/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/LM1LC3N7/gladys-panasonic-viera/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-panasonic-viera/releases/tag/v0.1.1
